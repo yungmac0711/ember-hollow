@@ -19,12 +19,13 @@ export class HUD {
     this._last = {}; this._toastT = 0; this._subT = 0; this._areaT = 0;
     this._frames = 0; this._fpsT = 0;
     this._hintT = 0; this._hintSticky = false;
+    this._prioT = 0; this._q = []; this._later = null; this.prioLog = [];
   }
 
   /** M2 chunk A: small translucent buttons drawn from Art's ui_ glyphs (call once the atlas is loaded). */
   initGlyphs() {
     const glyph = (id, key, alt) => { const el = $(id); if (el) el.innerHTML = iconHtml(key) || alt; };
-    glyph('btn-pause', 'ui_menu', '⏸'); glyph('btn-build', 'ui_craft', '🔨'); glyph('btn-craft', 'crafting_bench', '🛠');
+    glyph('btn-pause', 'ui_menu', '⏸'); glyph('btn-build', 'ui_craft', '🔨'); glyph('btn-craft', 'crafting_bench', '🛠'); glyph('btn-journal', 'ui_journal', '📖');
     $('btn-chat').innerHTML = '<span class="ico">💬</span>';
     const w = $('warmth'); w.querySelector('.ico').innerHTML = iconHtml('ui_warmth');
     this.fuel.querySelector('.ico').textContent = '🔥';
@@ -60,7 +61,13 @@ export class HUD {
   setBuildActive(on) { this.buildBtn.classList.toggle('active', on); }
   setRemoveActive(on) { $('btn-remove').classList.toggle('active', !!on); }
 
-  toast(text, secs = 2.2) { this.toastEl.textContent = text; this.toastEl.classList.add('show'); this._toastT = secs; }
+  /** prio (M2 chunk C: journal goals, chapters, coziness tiers): queues behind another prio toast and
+   *  isn't overwritten by ordinary toasts while it shows. */
+  toast(text, secs = 2.2, prio = false) {
+    if (this._prioT > 0) { if (prio) this._q.push([text, secs]); else this._later = [text, Math.min(secs, 1.6)]; return; }
+    this.toastEl.textContent = text; this.toastEl.classList.add('show'); this._toastT = secs;
+    this.lastToast = text; if (prio) { this._prioT = secs; this.prioLog.push(text); if (this.prioLog.length > 20) this.prioLog.shift(); }
+  }
 
   say(line, secs) {
     this.subLine.textContent = line; this.sub.classList.add('show');
@@ -77,6 +84,10 @@ export class HUD {
   }
 
   update(dt, renderer) {
+    if (this._prioT > 0 && (this._prioT -= dt) <= 0) {
+      if (this._q.length) { const [t, sc] = this._q.shift(); this.toast(t, sc, true); }
+      else if (this._later) { const [t, sc] = this._later; this._later = null; this.toast(t, sc); }
+    }
     if (this._toastT > 0 && (this._toastT -= dt) <= 0) this.toastEl.classList.remove('show');
     if (this._hintT > 0 && (this._hintT -= dt) <= 0 && !this._hintSticky) this.hint.classList.remove('show');
     if (this._subT > 0 && (this._subT -= dt) <= 0) this.sub.classList.remove('show');

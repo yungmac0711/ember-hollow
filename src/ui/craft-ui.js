@@ -3,10 +3,10 @@
 // next to a lit fire (cooking-pot recipes). Tabs follow recipes.json categories. All taps go through
 // onTap (pointer-based; iOS drops 'click').
 //
-// Unlock stopgap until chunk C (goals/chapters): goal (`g*_`) and `chapter:` unlocks count as
-// unlocked; `coziness:` unlocks are unlocked only for a tier with minScore 0 (cold_camp) and
-// otherwise show a lock with the tier's name; forge recipes are locked ("found deep below", chunk E).
-import { RECIPES, COZY_TIERS } from '../data/recipes.js';
+// M2 chunk C: real unlock gating lives in the Hearth Journal (src/progress/journal.js): goal ids unlock
+// when the goal completes, `chapter:` when the chapter starts, `coziness:` once that tier has been
+// reached; forge recipes stay locked ("found deep below", chunk E). main.js installs the resolver.
+import { RECIPES } from '../data/recipes.js';
 import { ITEM_INFO } from '../entities/items.js';
 import { PIECES, RECIPE_PIECE, iconHtml } from '../build/pieces.js';
 import { onTap } from './tap.js';
@@ -26,17 +26,11 @@ export function ingredientsOf(r) {
   if (r.id === 'waylamp') list.push({ item: 'hand_lantern', count: 1 });
   return list;
 }
-/** Stopgap unlock rule → { ok, hint } */
-export function unlockState(r) {
-  if (r.station === 'forge') return { ok: false, hint: 'Found deep below' };
-  const u = r.unlock || 'default';
-  if (u.startsWith('coziness:')) {
-    const t = COZY_TIERS.find((c) => c.id === u.slice(9));
-    if (!t || t.minScore <= 0) return { ok: true };
-    return { ok: false, hint: `When your home feels like a ${t.name}` };
-  }
-  return { ok: true }; // default, g*_ goals and chapter: unlocks (chunk C wires the real ones)
-}
+let resolver = (r) => (r.station === 'forge' ? { ok: false, hint: 'Found deep below' } : { ok: true });
+/** main.js: (recipe) => { ok, hint } from the journal */
+export function setUnlockResolver(fn) { resolver = fn; }
+/** Unlock rule → { ok, hint } */
+export function unlockState(r) { return resolver(r); }
 
 export class CraftUI {
   /** opts: { getInv(), onCraft(recipe) → {ok, why?}, onPanel(open) } */
