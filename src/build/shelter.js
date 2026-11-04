@@ -201,6 +201,20 @@ export class BuildSystem {
     return this._groundMax(c.x, c.z, side === 0 ? [[0, -h], [0, 0], [0, h]] : [[-h, 0], [0, 0], [h, 0]]);
   }
   _cellEdges(i, j) { return [[i, j, 0], [i - 1, j, 0], [i, j, 1], [i, j - 1, 1]]; }
+  /** Roof-log is a 30° lean-to whose ridge is at local +Z (art note): turn it so the ridge sits on a supporting
+   *  wall — the one farthest along the builder's view (the back wall), preferring a solid wall whose opposite
+   *  edge is open or a door — and the logs run eave-to-ridge down to the open/door side. */
+  _roofYaw(i, j, f) {
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]], opp = [1, 0, 3, 2], edges = this._cellEdges(i, j);
+    let best = null, bs = -Infinity;
+    edges.forEach(([a, b, sd], k) => {
+      const w = this.slots.get(`edge:${a},${b},${sd}`); if (!w) return;
+      const [oa, ob, os] = edges[opp[k]], o = this.slots.get(`edge:${oa},${ob},${os}`);
+      const sc = (f ? f.x * dirs[k][0] + f.z * dirs[k][1] : 0) + (w.type === 'door' ? -0.6 : 0) + (!o || o.type === 'door' ? 0.3 : 0);
+      if (sc > bs) { bs = sc; best = dirs[k]; }
+    });
+    return best ? Math.atan2(best[0], best[1]) : 0;
+  }
 
   /** Compute where the selected piece would go, and whether it's valid. */
   _plan(player) {
@@ -254,11 +268,12 @@ export class BuildSystem {
       for (const [a, b, sd] of this._cellEdges(i, j)) { const w = this.slots.get(`edge:${a},${b},${sd}`); if (w) { support = true; y = Math.max(y, w.y); } }
       y += H;
       const key = `roof:${i},${j}`;
+      const ryaw = this._roofYaw(i, j, f) + this.rot * HALF; // ⟳ still turns it in 90° steps from there
       if (!support) { ok = false; why = 'A roof needs a wall under one edge'; }
       const smp = this.cave.sample(x, z, s);
       if (ok && smp.ceil < y + 0.5) { ok = false; why = 'The ceiling is too low here'; }
       if (ok && this.slots.has(key)) { ok = false; why = 'Something is already there'; }
-      return { type, key, i, j, x, y, z, yaw, ok, why };
+      return { type, key, i, j, x, y, z, yaw: ryaw, ok, why };
     }
     if (def.slot === 'rug') {
       const y = (this._cellPiece(i, j, 'cell') ? this.cellBase(i, j) : this.cave.floorAt(x, z)) + 0.006;
@@ -431,7 +446,7 @@ export class BuildSystem {
   // ---------------------------------------------------------------- save / restore
   serialize() {
     return this.pieces.map((p) => ({ id: p.id, type: p.type, key: p.key, i: p.i, j: p.j, side: p.side, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(4),
-      parent: p.parent, open: p.openTarget ? 1 : 0, store: p.store ? { ...p.store } : undefined }));
+      parent: p.parent, open: p.openTarget ? 1 : 0, store: p.store ? { ...p.store } : undefined, ...(p.type === 'roof' ? { ry: 1 } : {}) }));
   }
   /** Re-create saved pieces (no cost). Unknown types are skipped. */
   restore(list = []) {
@@ -441,6 +456,14 @@ export class BuildSystem {
       this._id = Math.max(this._id, d.id || 0);
       if (d.open) { p.open = p.openTarget = 1; if (this.batches[p.type].anim) this._writeAnim(p); if (p.leaf) p.leaf.on = false; }
       if (p.store && d.store) Object.assign(p.store, d.store);
+    }
+    // saves from before the lean-to fix kept the raw 0/90/180/270° yaw (ridge over the door): re-seat those
+    // roofs onto their back wall once everything (walls included) is restored
+    for (const d of list) {
+      if (d.type !== 'roof' || d.ry) continue;
+      const p = this.slots.get(d.key); if (!p || p.type !== 'roof') continue;
+      p.yaw = this._roofYaw(p.i, p.j, null);
+      p.matrix.compose(_v.set(p.x, p.y, p.z), _q.setFromAxisAngle(_yAxis, p.yaw), _one); this._write(p); this._changed();
     }
   }
   clearAll() { for (const p of [...this.pieces]) if (this.pieces.includes(p)) this.remove({}, p, true); }
