@@ -122,6 +122,7 @@ export class LoreNotes {
       },
     };
     for (const n of STORY.lore.notes || []) {
+      if (n.area === 'emberdeep') { this.deferred = (this.deferred || []).concat(n.id); continue; } // M2 chunk C: the 4 Emberdeep notes spawn with the area (chunk E)
       const fn = place[n.id];
       if (!fn || !ch[n.area]) { this.skipped = (this.skipped || []).concat(n.id); continue; }
       const s = fn();
