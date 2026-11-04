@@ -338,7 +338,7 @@ body.hud-hidden #btn-pause { opacity: .3; }
 .jtitle { font-weight: 700; font-size: 15px; color: var(--eh-amber, #ffb35c); }
 .jintro { font-size: 12.5px; font-style: italic; opacity: .8; margin-top: 3px; line-height: 1.35; }
 .jgoals { display: grid; gap: 6px; }
-.jgoal { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 12px; background: rgba(8,11,16,.45); border: 1px solid rgba(255,179,92,.1); }
+.jgoal { display: flex; align-items: center; gap: 10px; padding: 5px 9px; border-radius: 12px; background: rgba(8,11,16,.45); border: 1px solid rgba(255,179,92,.1); }
 .jgoal.done { border-color: rgba(159,224,168,.35); }
 .jgoal.done .jtext { opacity: .75; }
 .jchk { flex: 0 0 22px; height: 22px; border-radius: 50%; border: 1.5px solid rgba(255,190,120,.5); display: flex; align-items: center; justify-content: center; }
