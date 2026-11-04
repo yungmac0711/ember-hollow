@@ -4,6 +4,10 @@
 // world state (same rules as replies: most specific tier wins); never repeat the last line used for
 // that trigger; placeholders filled. A trigger blocked only by the global gap waits briefly.
 // sayNow(text) speaks immediately, ignoring cooldowns (rare dig finds' wrenLine, request lines).
+// M2 chunk C: story/data/m2_lines.json triggers live here too, with their own cooldowns (globalSec 20 since
+// ANY line, shared with ambient_lines; perTriggerSec 60). fish_bite ignores cooldowns. craft_success
+// takes { category } (falls back to `any`); craft_first_time takes { recipe }; any trigger can take
+// { line } to override the pool (a journal goal's own wrenLine beats the generic goal_complete line).
 import { STORY } from '../data/story.js';
 import { bestTier, fill } from './when.js';
 
@@ -17,17 +21,34 @@ export class AmbientLines {
     this.triggerAt = {}; this.pending = null; this.time = 0;
     this.onLine = null; // (trigger, line) => void
     this.log = [];
+    const m2 = STORY.m2Lines || { triggers: {} };
+    this.m2 = m2.triggers || {};
+    this.m2Gap = m2.cooldowns?.globalSec ?? 20; this.m2Per = m2.cooldowns?.perTriggerSec ?? 60;
+    this.noCooldown = new Set(['fish_bite']);
   }
 
-  has(trigger) { return !!this.triggers[trigger]; }
+  has(trigger) { return !!this.triggers[trigger] || !!this.m2[trigger]; }
+
+  /** m2_lines pool for a trigger → [{text}] */
+  _m2Pool(name, { category, recipe } = {}) {
+    const t = this.m2[name];
+    if (!t) return null;
+    let list = t;
+    if (name === 'craft_success') list = (category && t[category]?.length ? t[category] : t.any) || [];
+    else if (name === 'craft_first_time') list = (recipe && t[recipe]) || [];
+    else if (!Array.isArray(t)) list = t.any || [];
+    return list.map((x) => (typeof x === 'string' ? { text: x } : x));
+  }
 
   /** Ask for a line. Returns the line if spoken now, otherwise null. */
-  trigger(name, { force = false } = {}) {
-    const pool = this.triggers[name];
-    if (!pool) return null;
-    if (force) return this._say(name, pool); // one-off milestones (shelter_complete) skip cooldowns
-    if (this.time - (this.triggerAt[name] ?? -Infinity) < this.perTrigger) return null;
-    if (this.time - this.lastAt < this.globalGap) { this.pending = { name, until: this.time + this.holdPending }; return null; }
+  trigger(name, opts = {}) {
+    const { force = false, line = null } = opts;
+    const m2 = !!this.m2[name];
+    const pool = line ? [{ text: line }] : m2 ? this._m2Pool(name, opts) : this.triggers[name];
+    if (!pool?.length) return null;
+    if (force || this.noCooldown.has(name)) return this._say(name, pool); // one-off milestones (shelter_complete) skip cooldowns
+    if (this.time - (this.triggerAt[name] ?? -Infinity) < (m2 ? this.m2Per : this.perTrigger)) return null;
+    if (this.time - this.lastAt < (m2 ? this.m2Gap : this.globalGap)) { if (this.pending?.opts?.line && !line && this.time <= this.pending.until) return null; const gap = m2 ? this.m2Gap : this.globalGap; this.pending = { name, opts: { ...opts }, until: this.lastAt + gap + this.holdPending }; return null; } // held until the gap ends, then up to holdPending more
     return this._say(name, pool);
   }
 
@@ -62,6 +83,6 @@ export class AmbientLines {
     this.time += dt;
     const p = this.pending;
     if (p && this.time > p.until) this.pending = null;
-    else if (p && this.time - this.lastAt >= this.globalGap) { this.pending = null; this.trigger(p.name); }
+    else if (p && this.time - this.lastAt >= (this.m2[p.name] ? this.m2Gap : this.globalGap)) { this.pending = null; this.trigger(p.name, p.opts); }
   }
 }
