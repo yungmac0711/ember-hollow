@@ -34,7 +34,12 @@ import { onTap } from './ui/tap.js';
 import { Harvest } from './entities/harvest.js';
 import { Colliders } from './world/colliders.js';
 import { InventoryUI, HOTBAR } from './ui/inventory-ui.js';
-import { CraftUI, unlockState, ingredientsOf, outKey } from './ui/craft-ui.js';
+import { CraftUI, unlockState, ingredientsOf, outKey, setUnlockResolver } from './ui/craft-ui.js';
+import { Journal, DIALOGUES } from './progress/journal.js';
+import { scoreCoziness, TIERS as COZY } from './progress/coziness.js';
+import { JournalUI } from './ui/journal-ui.js';
+import { Coach } from './ui/coach.js';
+import { RECIPES } from './data/recipes.js';
 import { HUD } from './ui/hud.js';
 import { GameAudio } from './audio.js';
 import { loadModel, loadParts, loadScene } from './assets.js';
@@ -317,6 +322,102 @@ async function init() {
       else { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches && running) input.requestPointerLock(); }
     },
   });
+  // ------------------------------------------------------------ M2 chunk C: Hearth Journal, coziness, hints
+  const journal = new Journal();
+  setUnlockResolver((r) => journal.unlockState(r));
+  let cozy = { scope: 'none', score: 0, tier: 0, cats: {}, pieces: 0 };
+  const fillT = (t) => fill(t, gameState());
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const recipeName = (id) => RECIPES.find((r) => r.id === id)?.name || id;
+  const thingName = (id) => PIECES[id]?.name || ITEM_INFO[id]?.label || id.replace(/_/g, ' ');
+  const rewardText = (r) => !r ? '' : r.type === 'recipe' ? ` · new recipe: ${recipeName(r.id)}` : r.type === 'item' ? ` · +${r.count || 1} ${thingName(r.id)}`
+    : r.type === 'decoration' ? ` · ${thingName(r.id)} for your home` : '';
+  const wrenQueue = []; // chapter outros / intros, said when Wren is near (dialogue rewards wait in journal.dialogues)
+  journal.onReward = (r) => {
+    if (r.type !== 'item' && r.type !== 'decoration') return;
+    const inv = player.inventory; inv[r.id] = (inv[r.id] || 0) + (r.count || 1); invUI.setInventory(inv);
+  };
+  journal.onGoal = (g) => {
+    hud.toast(`📖 ${fillT(g.text)} ✓${rewardText(g.reward)}`, 3, true); audio.blip(880);
+    ambient.trigger('goal_complete', g.wrenLine ? { line: g.wrenLine } : {});
+    game.lastGoal = { id: g.id, t: game.time };
+    if (journalUI.isOpen) journalUI.render();
+  };
+  journal.onChapter = (c, next) => {
+    hud.toast(`📖 Chapter complete: ${c.title}${rewardText(c.chapterReward)}`, 3.4, true);
+    if (next) hud.toast(`📖 Chapter ${journal.ch + 1}: ${next.title}`, 2.8, true);
+    ambient.trigger('chapter_complete');
+    if (c.outro) wrenQueue.push(c.outro);
+    if (next?.intro) wrenQueue.push(next.intro);
+    memory.addFact('milestone', `Cam finished the journal chapter "${c.title}"`, 2);
+  };
+  const journalUI = new JournalUI({
+    journal, getCozy: () => cozy, fill: fillT,
+    onPanel: (open) => {
+      if (open) { invUI.close(); craftUI.close(); input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); }
+      else { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches && running) input.requestPointerLock(); }
+    },
+  });
+  const coach = new Coach({ enabled: () => settings.s.hints !== false });
+  function openJournal() {
+    journalUI.open(); audio.blip(520); coach.done('journal');
+    ambient.trigger('journal_opened');
+    hud.toast(`Coziness here: ${cozy.score} · ${COZY[cozy.tier].name}`, 2.2);
+  }
+  onTap(document.getElementById('btn-journal'), () => { if (!running || paused) return; if (journalUI.isOpen) journalUI.close(); else openJournal(); });
+  function biscuitCue(cue) {
+    if (/lap|zoomie/.test(cue)) puppy.startZoomies(player);
+    else if (/flops|sprawls|rolls|belly/.test(cue)) puppy.pet();
+    else puppy.bark('cozy', null);
+    puppy.events = puppy.events.filter((e) => e !== 'petted' && e !== 'zoomies'); // the tier line is Wren's moment
+  }
+  const roaring = (f) => f.fuel / (FC.secondsPerStick * 4) > 0.75;
+  /** Twice a second (and right after placing / removing): coziness here, journal state goals, Wren's queued lines. */
+  function progressTick() {
+    cozy = scoreCoziness({ pieces: build.pieces, fires: fires.fires.filter((f) => f !== titleFire), pos: player.pos, enclosed: build.enclosedCells(), G: CONFIG.build.grid, roaring });
+    if (cozy.tier > journal.cozyBest) {
+      const from = journal.cozyBest, T = COZY[cozy.tier];
+      journal.cozyBest = cozy.tier;
+      let extra = '';
+      for (let i = from + 1; i <= cozy.tier; i++) {
+        const u = COZY[i].unlock;
+        if (u?.type === 'recipe') extra += ` · new recipe: ${recipeName(u.id)}`;
+        else if (u?.type === 'decoration') { journal.onReward(u); extra += ` · ${thingName(u.id)} for your home`; }
+      }
+      const cue = pick(T.biscuit);
+      hud.toast(`✨ ${T.name} · coziness ${cozy.score}${extra}`, 3.4, true); audio.blip(990);
+      ambient.sayNow(pick(T.wren), 'coziness_tier');
+      biscuitCue(cue);
+      game.lastTierUp = { tier: T.id, from: COZY[from].id, score: cozy.score, cue, t: game.time };
+      memory.addFact('milestone', `Cam's home reached ${T.name} (coziness ${cozy.score})`, 2);
+      if (craftUI.isOpen) craftUI.render();
+    }
+    const inv = player.inventory;
+    journal.update({ counts: build.counts(), holding: (inv.waylamp || 0) > 0 && lantern.on ? 'waylamp' : invUI.selected, area: currentArea?.id, cozyTier: cozy.tier });
+    // Wren: dialogue rewards + chapter lines when she's near and hasn't just spoken
+    const dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
+    if ((wrenQueue.length || journal.dialogues.length) && dw < 6 && ambient.time - ambient.lastAt > 8 && !chat.open) {
+      if (journal.dialogues.length) { const id = journal.dialogues.shift(); if (DIALOGUES[id]) ambient.sayNow(DIALOGUES[id], 'journal_dialogue'); game.lastDialogue = id; }
+      else ambient.sayNow(wrenQueue.shift(), 'journal_chapter');
+    }
+    if (journalUI.isOpen) journalUI.render();
+  }
+  /** First-session hints (src/ui/coach.js): when each one is useful. */
+  let coachT = 0;
+  function coachTick(dt) {
+    coach.update(dt);
+    if ((coachT -= dt) > 0) return;
+    coachT = 0.5;
+    const inv = player.inventory, t = game.time - (game.startedAt || 0);
+    if (t > 1) coach.show('move', 10);
+    if (!coach.seen.has('move') && t < 20) return; // walking + looking first
+    if (ctxAction?.kind === 'harvest' || harvest.nodes.some((n) => n.alive && !n.gather && Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z) < 3)) coach.show('gather');
+    if (inv.wood >= FC.woodToBuild && inv.flint >= FC.flintToBuild && !fires.nearest(player.pos, 14, true)) coach.show('campfire');
+    if (fires.nearest(player.pos, 14, true) && !build.find('crafting_bench') && !(inv.crafting_bench > 0)) coach.show('bench');
+    if (lantern.has && t > 60 && !fires.nearest(player.pos, 16, true)) coach.show('lantern');
+    if (journal.done.size >= 1) coach.show('journal');
+  }
+
   /** Bench / lit-fire cooking pot near Cam → that station, else 'hand'. */
   function nearStation() {
     let best = null, bd = 2.8;
@@ -338,12 +439,19 @@ async function init() {
     if (r.output.id === 'campfire') { spot = canBuildFireHere(); if (!spot) { hud.toast('Find a clear, flat spot for the fire', 1.8); return { ok: false, why: 'spot' }; } }
     for (const i of ing) inv[i.item] -= i.count;
     const key = outKey(r), n = r.output.count || 1, name = r.name;
-    if (spot) { fires.build(spot, FC.woodToBuild); hud.toast('🔥 Campfire lit!', 2.2); audio.pop(1); ambient.trigger('fire_lit'); craftUI.close(); }
+    if (spot) { fires.build(spot, FC.woodToBuild); hud.toast('🔥 Campfire lit!', 2.2); audio.pop(1); ambient.trigger('fire_lit'); craftUI.close(); coach.done('campfire'); }
     else inv[key] = (inv[key] || 0) + n;
     if (key === 'waylamp') { lantern.has = true; lantern.on = true; hud.toast('🏮 The waylamp takes the hand lantern’s place', 2.4); }
     else if (!spot) hud.toast(`+${n} ${name.toLowerCase()}${PIECES[key] ? ' · place it from 🔨' : ITEM_INFO[key]?.food ? ' · tap it twice to eat' : ''}`, 1.8);
     audio.blip(r.station === 'cooking_pot' ? 700 : 600);
-    if (r.station === 'cooking_pot') ambient.trigger('stew_cooking', { force: false });
+    // M2 chunk C: journal (a goal's own wrenLine beats the craft line), then craft_first_time / craft_success
+    const first = !journal.crafted.has(r.id); journal.crafted.add(r.id);
+    const goals = [...journal.emit('craft', r.id), ...(r.station === 'cooking_pot' ? journal.emit('cook', r.id) : [])];
+    if (!goals.some((g) => g.wrenLine)) {
+      if (r.station === 'cooking_pot') ambient.trigger('stew_cooking', { force: false });
+      else if (first && ambient.m2.craft_first_time?.[r.id]) ambient.trigger('craft_first_time', { recipe: r.id });
+      else if (!spot) ambient.trigger('craft_success', { category: r.category });
+    }
     game.crafted = (game.crafted || 0) + 1; game.lastCraft = { id: r.id, t: game.time };
     invUI.setInventory(inv);
     return { ok: true };
@@ -373,7 +481,7 @@ async function init() {
       inv.hand_lantern = 1; lantern.has = true; lantern.on = true; audio.blip(640);
       hud.toast('🏮 You make a small, plain lantern', 2.2); invUI.setInventory(inv); return true;
     }
-    lantern.has = true;
+    lantern.has = true; coach.done('lantern');
     const on = lantern.toggle(); audio.blip(on ? 640 : 420);
     hud.toast(on ? 'Lantern lit' : 'Lantern stowed', 1.0);
     return on;
@@ -477,6 +585,7 @@ async function init() {
       notes: [...lore.read],
       keepsakesFound: [...keepsakesFound],
       dayCount, shelterComplete,
+      journal: journal.serialize(), // M2 chunk C
       // Chunk C
       world: dayNight.serialize(),
       warmth: +warmth.toFixed(1), stewHold: Math.round(stewHold),
@@ -503,6 +612,7 @@ async function init() {
     lore.read = new Set(d.notes || []); invUI.setJournal(lore.journal());
     for (const k of d.keepsakesFound || []) keepsakesFound.add(k);
     dayCount = d.dayCount || 1; shelterComplete = !!d.shelterComplete;
+    journal.restore(d.journal); // older saves: a fresh journal (placed pieces still count for place/build goals)
     // Chunk C (older saves: no world → a fresh morning, full-ish warmth, everything standing)
     dayNight.restore(d.world || { tod: 60 });
     warmth = Number.isFinite(d.warmth) ? d.warmth : WC.start; stewHold = d.stewHold || 0;
@@ -731,6 +841,7 @@ async function init() {
         recentFinds.push(a.it.kind === 'wood' ? 'wood' : a.it.kind); if (recentFinds.length > 5) recentFinds.shift();
         hud.toast(`+1 ${ITEM_INFO[a.it.kind].label}`, 1.2);
         ambient.trigger(foundTrigger(a.it.kind));
+        journal.emit('gather', a.it.kind, 1); coach.done('gather');
         if (a.it.kind === 'flint') memory.addFact('find', `Cam found flint for the first time`, 2);
         break;
       }
@@ -747,9 +858,10 @@ async function init() {
         hud.toast('🔥 Campfire lit!', 2.5); audio.blip(330); audio.pop(1);
         ambient.trigger('fire_lit');
         memory.addFact('milestone', 'Cam lit their first campfire in the Hollow', 3);
+        journal.emit('craft', 'campfire'); journal.crafted.add('campfire'); coach.done('campfire');
         break;
       }
-      case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); break;
+      case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); journal.emit('pet', 'biscuit'); break;
       case 'read': openNote(a.note.id); break;
       case 'eat': eatStew(a.food); break;
       case 'sleep': openSleep(); break;
@@ -771,13 +883,15 @@ async function init() {
       case 'build': {
         const r = build.place(inv);
         if (r.ok) {
-          const name = PIECES[r.piece.type].name;
-          hud.toast(`${name} placed`, 1.2); audio.blip(360);
+          const name = PIECES[r.piece.type].name, cz0 = cozy.score;
+          progressTick(); // coziness + journal pieces right away
+          hud.toast(`${name} placed${cozy.scope !== 'none' && cozy.score !== cz0 ? ` · coziness ${cozy.score}` : ''}`, 1.4); audio.blip(360);
+          if (r.piece.type === 'crafting_bench') { ambient.trigger('bench_placed'); coach.done('bench'); }
           if (!shelterComplete && build.enclosedCells().size) {
             shelterComplete = true; ambient.trigger('shelter_complete', { force: true });
             memory.addFact('milestone', 'Cam finished a real shelter: floor, walls, roof and a door', 3);
             hud.toast('🏠 Shelter complete!', 2.6);
-          } else ambient.trigger('build_piece_placed');
+          } else if (r.piece.type !== 'crafting_bench') ambient.trigger('build_piece_placed');
           if (build.pieces.length === 1) memory.addFact('milestone', 'Cam started building a shelter', 3);
           if (r.piece.type === 'hearth') hud.toast('Hearth built. Add wood to light it', 2.4);
         } else hud.toast(r.why, 1.8);
@@ -823,6 +937,7 @@ async function init() {
   function doSleep() {
     if (sleeping) return;
     sleeping = true; sleepEl.classList.add('hidden');
+    journal.emit('sleep', 'bed_roll');
     puppy.curlUp(player);                            // Biscuit curls up first (goodnight lines can see it)
     const gn = sleepLine(STORY.sleepLines?.goodnight);
     if (gn) ambient.sayNow(gn, 'goodnight');
@@ -879,7 +994,8 @@ async function init() {
     invUI.setRing(hold.t / dur, sp.x, sp.y, { tree: '🪓', rock: '⛏️', bush: '🫐', tuft: '🌾' }[node.type]);
     if (hold.t >= dur) {
       const got = harvest.harvest(node);
-      for (const [k, n] of Object.entries(got)) inv[k] = (inv[k] || 0) + n;
+      for (const [k, n] of Object.entries(got)) { inv[k] = (inv[k] || 0) + n; journal.emit('gather', k, n); }
+      coach.done('gather');
       hud.toast(Object.entries(got).map(([k, n]) => `+${n} ${ITEM_INFO[k].label}`).join('  '), 1.4);
       audio.blip(node.type === 'tree' ? 520 : 700);
       const kind = { tree: 'wood', rock: 'stone', bush: 'berry', tuft: 'fiber' }[node.type];
@@ -901,7 +1017,7 @@ async function init() {
       raycaster.setFromCamera(ndc, camera);
       const hitW = raycaster.intersectObject(wren.hit, false)[0];
       const hitP = raycaster.intersectObject(puppy.root, true)[0];
-      if (hitP && (!hitW || hitP.distance < hitW.distance) && hitP.distance < 5) { puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); }
+      if (hitP && (!hitW || hitP.distance < hitW.distance) && hitP.distance < 5) { puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); journal.emit('pet', 'biscuit'); }
       else if (hitW && hitW.distance < 12) chat.show();
     }
   }
@@ -912,6 +1028,7 @@ async function init() {
     const area = cave.chamberAt(player.pos.x, player.pos.z);
     if (area && area !== currentArea) {
       hud.showArea(area.name);
+      journal.emit('visit', area.id);
       if (!memory.hasFact(`Cam explored ${area.name}`) && area !== lanternmouth) {
         memory.addFact('milestone', `Cam explored ${area.name}`, 2);
       }
@@ -1058,7 +1175,7 @@ async function init() {
   }
 
   // ------------------------------------------------------------ loop
-  let last = performance.now();
+  let last = performance.now(), progT = 0;
   let running = false;
   const _camPos = new THREE.Vector3();
   function frame(now) {
@@ -1104,6 +1221,8 @@ async function init() {
       for (const pot of cooked) { hud.toast('🍲 Stew is ready! Use to take it', 2.4); audio.blip(820); }
       updateRequests(dt);
       ambient.update(dt);
+      if ((progT -= dt) <= 0) { progT = 0.5; progressTick(); }
+      coachTick(dt);
       if (performance.now() - lastSaveAt > 30000) saveNow('auto');
     } else {
       // title backdrop: slow orbit around the fire by the camp
@@ -1128,7 +1247,7 @@ async function init() {
     wren.update(dt, player, fires, chat.open, {
       fog: fogState(), items: running ? items : null, nightSurface: dayNight.nightness * dayNight.b, camera, camLantern: lantern.k,
       onGather: (it) => {
-        items.pickUp(it); player.inventory[it.kind] = (player.inventory[it.kind] || 0) + 1;
+        items.pickUp(it); player.inventory[it.kind] = (player.inventory[it.kind] || 0) + 1; journal.emit('gather', it.kind, 1);
         hud.toast(`Wren hands you ${ITEM_INFO[it.kind].label}`, 1.8); audio.blip(600);
       },
     });
@@ -1162,7 +1281,8 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { craftUI, craft, nearStation, usePiece, pieceAction, get warmth() { return warmth; }, set warmth(v) { warmth = v; }, chairSeat, cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.defineProperty(game, 'cozy', { get: () => cozy });
+  Object.assign(game, { journal, journalUI, coach, openJournal, progressTick, canBuildFireHere: () => canBuildFireHere(), craftUI, craft, nearStation, usePiece, pieceAction, get warmth() { return warmth; }, set warmth(v) { warmth = v; }, chairSeat, cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });
@@ -1203,6 +1323,7 @@ async function init() {
     if (!matchMedia('(pointer: coarse)').matches) input.requestPointerLock();
     hud.toast(mode === 'continue' ? 'Welcome back to the Hollow' : 'Gather wood 🪵 and flint ✦ to light a fire', 3.5);
     lastActivity = performance.now(); lastSaveAt = performance.now();
+    game.startedAt = game.time;
     if (mode === 'new') saveNow('new');
   }
   startMsg.textContent = '';

@@ -297,7 +297,7 @@ html.tier-high .panel { -webkit-backdrop-filter: blur(10px) saturate(1.1); backd
 
 /* ---- Settings → Hide HUD (H on a keyboard): only a faint pause button stays ---- */
 body.hud-hidden #hotbar, body.hud-hidden #palette, body.hud-hidden #buttons, body.hud-hidden #hud-tl, body.hud-hidden #crosshair,
-body.hud-hidden #btn-bag, body.hud-hidden #btn-build, body.hud-hidden #btn-craft, body.hud-hidden #btn-chat, body.hud-hidden #toast { visibility: hidden; }
+body.hud-hidden #btn-bag, body.hud-hidden #btn-journal, body.hud-hidden #coach, body.hud-hidden #btn-build, body.hud-hidden #btn-craft, body.hud-hidden #btn-chat, body.hud-hidden #toast { visibility: hidden; }
 body.hud-hidden #btn-pause { opacity: .3; }
 .srow { min-height: 36px; }
 .settings-body { gap: 6px; }
@@ -327,3 +327,37 @@ body.hud-hidden #btn-pause { opacity: .3; }
 .craft-go { min-width: 72px; min-height: 40px; border-radius: 10px; border: 1.5px solid var(--eh-ember, #ff7a1a); background: rgba(224,138,46,.22); color: var(--text); font: inherit; font-weight: 700; touch-action: none; }
 .craft-go[disabled] { border-color: rgba(255,255,255,.15); background: rgba(255,255,255,.04); opacity: .55; }
 .craft-lock { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; opacity: .8; max-width: 120px; text-align: right; }
+
+/* ---------------------------------------------------------------- M2 chunk C: Hearth Journal + tutorial hints */
+#journalui { width: min(560px, calc(100vw - 40px - var(--sal) - var(--sar))); }
+.jtab { flex: 0 0 auto; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; touch-action: none; }
+.jtab[disabled] { opacity: .4; }
+.jtab.done { color: #9fe0a8; }
+.jtab .sm, .jcozy .sm, .jchk .sm { --is: 16px; width: 16px; height: 16px; font-size: 13px; }
+.jhead { margin-bottom: 8px; }
+.jtitle { font-weight: 700; font-size: 15px; color: var(--eh-amber, #ffb35c); }
+.jintro { font-size: 12.5px; font-style: italic; opacity: .8; margin-top: 3px; line-height: 1.35; }
+.jgoals { display: grid; gap: 6px; }
+.jgoal { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 12px; background: rgba(8,11,16,.45); border: 1px solid rgba(255,179,92,.1); }
+.jgoal.done { border-color: rgba(159,224,168,.35); }
+.jgoal.done .jtext { opacity: .75; }
+.jchk { flex: 0 0 22px; height: 22px; border-radius: 50%; border: 1.5px solid rgba(255,190,120,.5); display: flex; align-items: center; justify-content: center; }
+.jgoal.done .jchk { border-color: #9fe0a8; background: rgba(159,224,168,.18); }
+.jmain { flex: 1; min-width: 0; }
+.jtext { font-size: 13.5px; font-weight: 600; }
+.jhint { font-size: 11.5px; opacity: .65; margin-top: 1px; }
+.jprog { flex: 0 0 auto; font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
+.jreward { margin-top: 8px; font-size: 12px; opacity: .75; }
+.jcozy { margin-top: 6px; font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 5px; }
+.jbars { display: grid; gap: 7px; }
+.jbar { display: grid; grid-template-columns: 7.5em 1fr 3.5em; align-items: center; gap: 8px; font-size: 12.5px; }
+.jbar .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.jbar .fill { height: 100%; background: linear-gradient(90deg, #ff7a1a, #ffd27a); }
+.jbv { text-align: right; opacity: .75; font-variant-numeric: tabular-nums; }
+.jfoot { margin-top: 10px; }
+#coach { position: absolute; bottom: calc(104px + var(--sab)); left: 50%; transform: translateX(-50%); max-width: min(380px, calc(100vw - 260px)); display: flex; align-items: center; gap: 4px;
+  padding: 4px 4px 4px 11px; border-radius: 12px; background: rgba(21,27,36,.62); border: 1px solid rgba(224,138,46,.3); font-size: 12px; line-height: 1.3; color: var(--text);
+  opacity: 0; transition: opacity .35s; pointer-events: none; }
+#coach.show { opacity: .95; }
+#coach.show .coach-x { pointer-events: auto; }
+.coach-x { flex: 0 0 auto; width: 32px; height: 30px; border: none; background: none; color: var(--text); opacity: .7; font-size: 14px; touch-action: none; }

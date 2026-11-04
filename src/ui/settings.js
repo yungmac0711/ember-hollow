@@ -6,7 +6,7 @@
 import { SETTINGS_KEY, TIER, tierLow } from '../config.js';
 import { onTap } from './tap.js';
 
-export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto', showFps: false, hudScale: 'medium', hideHud: false };
+export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto', showFps: false, hudScale: 'medium', hideHud: false, hints: true };
 
 export function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
@@ -40,6 +40,11 @@ export class SettingsPanel {
     const showFps = () => { fps.setAttribute('aria-pressed', String(!!this.s.showFps)); fps.textContent = this.s.showFps ? 'On' : 'Off'; };
     showFps();
     onTap(fps, () => { this.s.showFps = !this.s.showFps; showFps(); this._changed(); });
+    // M2 chunk C: tutorial hints on/off
+    const hn = $('set-hints');
+    const showHints = () => { hn.setAttribute('aria-pressed', String(this.s.hints !== false)); hn.textContent = this.s.hints !== false ? 'On' : 'Off'; };
+    showHints();
+    onTap(hn, () => { this.s.hints = this.s.hints === false; showHints(); this._changed(); });
     const seg = $('set-tier');
     const showTier = () => {
       for (const b of seg.children) b.classList.toggle('on', b.dataset.tier === this.s.tier);

@@ -38,6 +38,8 @@
     <div id="crosshair"></div>
     <div id="tip"></div>
     <div id="woof">woof!</div>
+    <!-- M2 chunk C: first-session tutorial hints (src/ui/coach.js) -->
+    <div id="coach" role="status"><span class="coach-text"></span><button class="coach-x" aria-label="Dismiss hint">✕</button></div>
     <div id="fps" class="hidden"></div>
     <!-- M2 chunk A: minimal HUD. Top left: only what matters right now (cold, fire fuel nearby, Wren's
          request near her, a hint that fades); top right: small translucent buttons (pause, pack, build, talk) -->
@@ -52,6 +54,7 @@
       <button id="btn-bag" class="hbtn" aria-label="Pack"></button>
       <button class="hbtn" id="btn-build" aria-label="Build"></button>
       <button class="hbtn" id="btn-craft" aria-label="Craft"></button>
+      <button class="hbtn" id="btn-journal" aria-label="Hearth Journal"></button>
       <button class="hbtn" id="btn-chat" aria-label="Talk"></button>
     </div>
 
@@ -82,6 +85,13 @@
     <div class="panel-body" id="craft-list"></div>
   </div>
 
+  <!-- M2 chunk C: the Hearth Journal (src/ui/journal-ui.js) -->
+  <div id="journalui" class="panel hidden" role="dialog" aria-label="Hearth Journal">
+    <div class="panel-head"><span>Hearth Journal</span><button class="panel-close" aria-label="Close">✕</button></div>
+    <div id="journal-tabs" class="craft-tabs"></div>
+    <div class="panel-body" id="journal-body"></div>
+  </div>
+
   <div id="chestui" class="panel hidden" role="dialog" aria-label="Storage chest">
     <div class="panel-head"><span>Storage chest</span><button class="panel-close" data-close="chestui" aria-label="Close">✕</button></div>
     <div class="panel-body chest-cols">
@@ -109,6 +119,7 @@
       <label class="srow"><span>Look sensitivity</span><input type="range" id="set-sens" min="30" max="250" step="5" /><output id="set-sens-v"></output></label>
       <div class="srow srow2"><span>Invert look Y</span><button class="sbtn" id="set-invert" aria-pressed="false">Off</button><span>Show FPS</span><button class="sbtn" id="set-fps" aria-pressed="false">Off</button></div>
       <div class="srow srow2"><span>HUD size</span><div class="seg" id="set-hud"><button class="sbtn" data-hud="small">S</button><button class="sbtn" data-hud="medium">M</button><button class="sbtn" data-hud="large">L</button></div><span>Hide HUD</span><button class="sbtn" id="set-hidehud" aria-pressed="false">Off</button></div>
+      <div class="srow"><span>Tutorial hints</span><button class="sbtn" id="set-hints" aria-pressed="true">On</button></div>
       <div class="srow"><span>Graphics</span><div class="seg" id="set-tier"><button class="sbtn" data-tier="auto">Auto</button><button class="sbtn" data-tier="low">Low</button><button class="sbtn" data-tier="high">High</button></div></div>
       <p class="pause-note" id="set-note"></p>
       <button class="tbtn hidden" id="set-reload">Restart to apply lights</button>
