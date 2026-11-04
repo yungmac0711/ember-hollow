@@ -516,7 +516,7 @@ export class BuildSystem {
   findInteractable(pos, forward, reach = 2.1) {
     let best = null, bs = Infinity;
     for (const p of this.pieces) {
-      if (p.type !== 'door' && p.type !== 'chest') continue;
+      if (p.type !== 'door' && p.type !== 'chest' && p.type !== 'bedroll') continue; // chunk C: bed roll → sleep
       const dx = p.x - pos.x, dz = p.z - pos.z, d = Math.hypot(dx, dz);
       if (d > reach) continue;
       const facing = d > 0.01 ? (dx * forward.x + dz * forward.z) / d : 1;
@@ -529,10 +529,10 @@ export class BuildSystem {
   pickScreen(x, y, camera, pos) {
     let best = null, bd = Infinity;
     for (const p of this.pieces) {
-      if (p.type !== 'door' && p.type !== 'chest') continue;
+      if (p.type !== 'door' && p.type !== 'chest' && p.type !== 'bedroll') continue;
       const d = Math.hypot(p.x - pos.x, p.z - pos.z);
       if (d > 3) continue;
-      _v.set(p.x, p.y + (p.type === 'door' ? 1.0 : 0.35), p.z).project(camera);
+      _v.set(p.x, p.y + (p.type === 'door' ? 1.0 : p.type === 'bedroll' ? 0.15 : 0.35), p.z).project(camera);
       if (_v.z > 1) continue;
       const e = Math.hypot((_v.x + 1) / 2 * window.innerWidth - x, (1 - _v.y) / 2 * window.innerHeight - y);
       if (e < 130 / Math.max(1, d) && e < bd) { bd = e; best = p; }
@@ -589,6 +589,14 @@ export class BuildSystem {
     this._enclosed = out; this._encDirty = false;
     return out;
   }
+  // Chunk C: rain masking / rain-on-roof / warmth. A roof piece's y is already the wall top.
+  /** True when a roof tile covers (x,z) — open-sided lean-tos count (rain, not warmth). */
+  underRoof(pos) {
+    for (const p of this.pieces) if (p.type === 'roof' && Math.abs(p.x - pos.x) <= G / 2 && Math.abs(p.z - pos.z) <= G / 2) return true;
+    return false;
+  }
+  /** Roof rects for the rain shader: [{x, z, top}] (G-sized squares). */
+  roofs() { return this.pieces.filter((p) => p.type === 'roof').map((p) => ({ x: p.x, z: p.z, top: p.y + 1.2 })); }
   inShelter(pos) { return this.enclosedCells().has(`${Math.round(pos.x / G)},${Math.round(pos.z / G)}`); }
   find(type) { return this.pieces.find((p) => p.type === type) || null; }
   summary() {

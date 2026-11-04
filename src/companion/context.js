@@ -14,7 +14,7 @@ export function fogWord(level, lit) {
 
 /**
  * @param state {location, locationDesc, fire:{anyLit, level, levelWord}, timeOfNight, shelter,
- *               recentFinds, memorySummary, puppy, fog, playerName}
+ *               recentFinds, memorySummary, puppy, fog, playerName, time, weather, warmth}
  */
 export function buildContextBlock(state) {
   const fields = {
@@ -31,5 +31,7 @@ export function buildContextBlock(state) {
   // Keep the writer's field order from the template.
   const order = [...CONTEXT_TEMPLATE.matchAll(/^([a-z_]+):/gm)].map((m) => m[1]);
   const lines = order.map((k) => `${k}: ${fields[k] ?? ''}`);
+  // Chunk C: surface day/night, weather and Cam's warmth (DATA_FORMATS state words)
+  for (const k of ['time', 'weather', 'warmth']) if (state[k] && !order.includes(k)) lines.push(`${k}: ${state[k]}`);
   return `[CONTEXT]\n${lines.join('\n')}\n[/CONTEXT]`;
 }

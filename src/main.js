@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Cave } from './world/cave.js';
 import { buildDecor } from './world/decor.js';
+import { InstanceCuller } from './render/instcull.js';
 import { buildDressing } from './world/dressing.js';
 import { LightBudget } from './render/lights.js';
 import { AmbientController } from './render/ambient.js';
@@ -33,6 +34,10 @@ import { InventoryUI, HOTBAR } from './ui/inventory-ui.js';
 import { HUD } from './ui/hud.js';
 import { GameAudio } from './audio.js';
 import { loadModel, loadParts, loadScene } from './assets.js';
+import { DayNight, timeWord, canSleepAt, T as DN, CYCLE as DAY_CYCLE } from './render/daynight.js';
+import { Cooking } from './fire/cooking.js';
+import { Surface, loadSurfaceParts, treeVariants } from './world/surface.js';
+import { bestTier, fill } from './companion/when.js';
 
 const FC = CONFIG.fire, R = CONFIG.render;
 const startMsg = document.getElementById('start-msg');
@@ -125,6 +130,7 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
+  const [surfParts, stewPotP] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw)]); // Chunk C
   const [loreNoteP, loreJournalP, loreSlateP, loreHookP] = await Promise.all([
     loadParts('loreNote', raw), loadParts('loreJournal', raw), loadParts('loreSlate', raw), loadParts('loreHook', raw)]);
 
@@ -136,8 +142,20 @@ async function init() {
   const items = new Items(scene, cave, seed, { wood: woodParts, stone: stoneParts, flint: flintParts, mushroom: mushroomParts });
   const fires = new FireSystem(scene, cave, pitParts, budget);
   const colliders = new Colliders();
-  const harvest = new Harvest(scene, cave, seed, colliders, [rockA]);
+  const surface = new Surface(scene, cave, seed, surfParts, { low: CONFIG.debug.low });
+  // Chunk C perf: per-instance frustum + fog-distance culling for static instanced decor
+  const instCull = new InstanceCuller();
+  instCull.addAll(decor.group, 32); instCull.addAll(dressing.group, 32);
+  for (const m of surface.meshes) instCull.add(m, 26);
+  const harvest = new Harvest(scene, cave, seed, colliders, [rockA], { variants: treeVariants(surfParts), trees: surface.trees });
+  const cooking = new Cooking(scene, stewPotP);
+  const dayNight = new DayNight(scene, cave, budget, { low: CONFIG.debug.low });
+  dayNight.setProjection(camera);
   const build = new BuildSystem(scene, cave, pieceParts, { fires, budget, colliders });
+  build.onChange = (piece, added) => {
+    if (piece.type === 'roof') dayNight.setRoofs(build.roofs());
+    if (!added && piece.fire) cooking.drop(piece.fire);
+  };
 
   const spawn = new THREE.Vector3(lanternmouth.x + 0.5, 0, lanternmouth.z + 2);
   spawn.y = cave.floorAt(spawn.x, spawn.z);
@@ -156,7 +174,7 @@ async function init() {
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
-  const lore = new LoreNotes(scene, cave, seed, { note: loreNoteP, journal: loreJournalP, slate: loreSlateP, hook: loreHookP });
+  const lore = new LoreNotes(scene, cave, seed, { note: loreNoteP, journal: loreJournalP, slate: loreSlateP, hook: loreHookP, clearingBirch: surface.clearingBirch });
   const reader = new ParchmentReader(document.getElementById('reader'));
   const requests = new Requests();
   const keepsakesFound = new Set();
@@ -168,10 +186,18 @@ async function init() {
   const ambient = new AmbientLines({ getState: () => gameState() });
   const recentFinds = [];
   let currentArea = lanternmouth;
-  let clock = 0; // night cycle seconds
-  const NIGHT = [[0, 'dusk'], [180, 'evening'], [600, 'deep night'], [1080, 'quiet hour'], [1500, 'pre-dawn']];
-  const CYCLE = 1800;
-  const timeOfNight = () => { let n = 'dusk'; for (const [t, name] of NIGHT) if (clock % CYCLE >= t) n = name; return n; };
+  // Chunk C: one clock for the whole world — DayNight.tod (24-min cycle, STYLE_GUIDE §8.2). Words for
+  // Wren's CONTEXT time_of_night field; `time` (day|dusk|night|deep_night) goes to the when filters.
+  const timeOfNight = () => {
+    const t = dayNight.tod;
+    if (t < DN.dayEnd) return t < 300 ? 'morning' : 'afternoon';
+    if (t < DN.duskEnd) return 'dusk';
+    if (t < 840) return 'evening'; if (t < 1200) return 'deep night'; if (t < DN.nightEnd) return 'pre-dawn';
+    return 'dawn';
+  };
+  // Warmth (CONFIG.warmth): never harmful. Cold only brings a frost vignette, Wren's line and Biscuit.
+  const WC = CONFIG.warmth;
+  let warmth = WC.start, warmWord = 'ok', stewHold = 0;
   let fogK = 0; // 0 = cold/thick … 1 = warm/thin
 
   function nearestFireLevel() {
@@ -188,11 +214,11 @@ async function init() {
     const sel = invUI?.selected;
     return {
       fire: !lit ? 'out' : level < 25 ? 'low' : level > 75 ? 'roaring' : 'lit',
-      time: 'day',                // no day/night yet (M1 later chunk)
+      time: timeWord(dayNight.tod),
       area: inShelter ? 'shelter' : currentArea?.id ?? null,
       inShelter,
-      weather: 'clear',           // no weather yet
-      warmth: 'ok',               // no warmth system yet
+      weather: dayNight.weather,
+      warmth: warmWord,
       inventory: { ...player.inventory },
       biscuit: puppy.mood,
       dayCount,
@@ -218,6 +244,7 @@ async function init() {
       inventory: { ...player.inventory },
       areaName: currentArea ? currentArea.name : 'the Hollow',
       dayCount,
+      time: timeWord(dayNight.tod), weather: dayNight.weather, warmth: warmWord,
       world: worldState(),
     };
   }
@@ -347,6 +374,7 @@ async function init() {
 
   // ------------------------------------------------------------ save / load
   let titleFire = null;
+  const savedFires = () => fires.fires.filter((f) => !f.hearth && f !== titleFire);
   function snapshot() {
     const P = player.pos;
     return {
@@ -354,11 +382,16 @@ async function init() {
       inventory: { ...player.inventory },
       pieces: build.serialize(),
       hearths: build.pieces.filter((p) => p.fire).map((p) => ({ id: p.id, fuel: +p.fire.fuel.toFixed(1) })),
-      fires: fires.fires.filter((f) => !f.hearth && f !== titleFire).map((f) => ({ x: +f.pos.x.toFixed(3), y: +f.pos.y.toFixed(3), z: +f.pos.z.toFixed(3), fuel: +f.fuel.toFixed(1) })),
+      fires: savedFires().map((f) => ({ x: +f.pos.x.toFixed(3), y: +f.pos.y.toFixed(3), z: +f.pos.z.toFixed(3), fuel: +f.fuel.toFixed(1) })),
       requests: requests.serialize(),
       notes: [...lore.read],
       keepsakesFound: [...keepsakesFound],
-      dayCount, clock: Math.round(clock), shelterComplete,
+      dayCount, shelterComplete,
+      // Chunk C
+      world: dayNight.serialize(),
+      warmth: +warmth.toFixed(1), stewHold: Math.round(stewHold),
+      harvest: harvest.serialize(), items: items.serialize(),
+      pots: cooking.serialize((f) => { const h = build.pieces.find((q) => q.fire === f); if (h) return 'h' + h.id; const i = savedFires().indexOf(f); return i >= 0 ? 'f' + i : null; }),
     };
   }
   function applySave(d) {
@@ -368,7 +401,7 @@ async function init() {
     build.clearAll();
     build.restore(d.pieces || []);
     for (const h of d.hearths || []) { const p = build.pieces.find((q) => q.id === h.id); if (p?.fire) p.fire.fuel = h.fuel || 0; }
-    for (const f of d.fires || []) fires.build(new THREE.Vector3(f.x, f.y, f.z), 0).fuel = f.fuel || 0;
+    const restoredFires = (d.fires || []).map((f) => { const nf = fires.build(new THREE.Vector3(f.x, f.y, f.z), 0); nf.fuel = f.fuel || 0; return nf; });
     if (d.player) {
       player.pos.set(d.player.x, d.player.y, d.player.z); player.yaw = d.player.yaw || 0;
       wren.pos.copy(player.pos).add(new THREE.Vector3(1.4, 0, 1)); cave.resolve(wren.pos, 0.6); colliders.resolve(wren.pos, 0.35);
@@ -377,7 +410,13 @@ async function init() {
     requests.restore(d.requests);
     lore.read = new Set(d.notes || []); invUI.setJournal(lore.journal());
     for (const k of d.keepsakesFound || []) keepsakesFound.add(k);
-    dayCount = d.dayCount || 1; clock = d.clock || 0; shelterComplete = !!d.shelterComplete;
+    dayCount = d.dayCount || 1; shelterComplete = !!d.shelterComplete;
+    // Chunk C (older saves: no world → a fresh morning, full-ish warmth, everything standing)
+    dayNight.restore(d.world || { tod: 60 });
+    warmth = Number.isFinite(d.warmth) ? d.warmth : WC.start; stewHold = d.stewHold || 0;
+    harvest.restore(d.harvest); items.restore(d.items);
+    cooking.restore(d.pots, (k) => (typeof k !== 'string' ? null : k[0] === 'h' ? build.pieces.find((q) => 'h' + q.id === k)?.fire : restoredFires[+k.slice(1)]));
+    dayNight.setRoofs(build.roofs());
     currentArea = cave.chamberAt(player.pos.x, player.pos.z) || currentArea;
   }
   let lastSaveAt = 0;
@@ -450,7 +489,17 @@ async function init() {
     const bp = build.findInteractable(player.pos, fwd);
     if (node && bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z)) node = null; // nearer one wins
     if (node) return { label: node.type === 'tree' ? 'Hold: chop' : 'Hold: break', kind: 'harvest', node };
-    if (bp) return bp.type === 'door' ? { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp } : { label: 'Open chest', kind: 'chest', piece: bp };
+    if (bp) return bp.type === 'door' ? { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp }
+      : bp.type === 'bedroll' ? { label: 'Sleep', kind: 'sleep', piece: bp } : { label: 'Open chest', kind: 'chest', piece: bp };
+    // Chunk C: cooking on a lit campfire / hearth (selecting a mushroom or glowcap puts cooking first)
+    const cf = fires.nearest(player.pos, 2.2);
+    if (cf) {
+      const pot = cooking.potFor(cf), ing = pickIngredient(), sel = invUI.selected;
+      const wantsCook = ing && (sel === 'mushroom' || sel === 'glowcap' || !(inv.wood > 0 && cf.canAddFuel()));
+      if (pot?.state === 'done') return { label: 'Take stew', kind: 'stew-take', pot };
+      if (pot?.state === 'idle' && wantsCook) return { label: `Add ${ITEM_INFO[ing].label}`, kind: 'stew-add', pot, ing };
+      if (!pot && cf.lit && wantsCook) return { label: 'Hang stew pot', kind: 'stew-hang', fire: cf };
+    }
     const nf = fires.nearest(player.pos, 2.4);
     if (nf && inv.wood > 0 && nf.canAddFuel()) return { label: nf.lit ? 'Add wood' : 'Relight', kind: 'fuel', fire: nf };
     const dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
@@ -463,6 +512,20 @@ async function init() {
     }
     if (dw < 2.4) return { label: 'Talk', kind: 'talk' };
     return null;
+  }
+
+  function pickIngredient() {
+    const inv = player.inventory, sel = invUI.selected;
+    if ((sel === 'mushroom' || sel === 'glowcap') && inv[sel] > 0) return sel;
+    return inv.glowcap > 0 ? 'glowcap' : inv.mushroom > 0 ? 'mushroom' : null;
+  }
+  function eatStew() {
+    const inv = player.inventory;
+    if (!(inv.stew > 0)) return false;
+    inv.stew--; warmth = Math.min(100, warmth + WC.stew); stewHold = WC.stewHold;
+    hud.toast('Warm mushroom stew. Toes thawing 🍲', 2); audio.blip(520);
+    ambient.trigger('stew_eaten', { force: true });
+    return true;
   }
 
   function doAction(a) {
@@ -497,7 +560,18 @@ async function init() {
       }
       case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); break;
       case 'read': openNote(a.note.id); break;
-      case 'eat': inv.stew--; hud.toast('Warm glowcap stew. Toes thawing.', 2); audio.blip(520); ambient.trigger('stew_eaten'); break;
+      case 'eat': eatStew(); break;
+      case 'sleep': openSleep(); break;
+      case 'stew-hang': {
+        const pot = cooking.hang(a.fire); if (!pot) break;
+        audio.blip(300); hud.toast(`Stew pot on. Add ${CONFIG.cooking.ingredients} mushrooms or glowcaps`, 2.2);
+        const ing = pickIngredient(); if (ing) addIngredient(pot, ing);
+        break;
+      }
+      case 'stew-add': addIngredient(a.pot, a.ing); break;
+      case 'stew-take':
+        if (cooking.take(a.pot)) { inv.stew = (inv.stew || 0) + 1; invUI.select('stew'); hud.toast('+1 stew 🍲 (tap it again to eat)', 2.2); audio.blip(700); }
+        break;
       case 'talk': chat.show(); break;
       case 'harvest': break; // hold-driven, see updateHold()
       case 'door': { const open = build.toggleDoor(a.piece); audio.blip(open ? 240 : 200); break; }
@@ -525,6 +599,61 @@ async function init() {
       }
     }
   }
+
+  function addIngredient(pot, kind) {
+    const inv = player.inventory;
+    if (!(inv[kind] > 0)) return;
+    inv[kind]--;
+    const started = cooking.add(pot, kind);
+    audio.blip(480);
+    if (started) { hud.toast('Bubbling away… 🍲', 2); ambient.trigger('stew_cooking', { force: true }); }
+    else hud.toast(`${ITEM_INFO[kind].label} in. ${CONFIG.cooking.ingredients - pot.ingredients.length} more`, 1.6);
+  }
+
+  // ------------------------------------------------------------ sleep (bed roll)
+  const sleepEl = document.getElementById('sleep'), sleepNote = document.getElementById('sleep-note'), fadeEl = document.getElementById('fade');
+  let sleeping = false;
+  function openSleep() {
+    if (sleeping) return;
+    if (!canSleepAt(dayNight.tod)) { hud.toast("It's still daytime. The bed roll can wait till dusk", 2.4); return; }
+    sleepNote.textContent = `Sleep until morning? (Day ${dayCount})`;
+    sleepEl.classList.remove('hidden');
+    input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock();
+  }
+  function closeSleep() {
+    sleepEl.classList.add('hidden');
+    if (!sleeping) { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches && running) input.requestPointerLock(); }
+  }
+  const sleepLine = (list) => {
+    const st = gameState(); const tier = bestTier(list || [], st.world);
+    return tier.length ? fill(weighted(tier).text, st) : null;
+  };
+  function doSleep() {
+    if (sleeping) return;
+    sleeping = true; sleepEl.classList.add('hidden');
+    puppy.curlUp(player);                            // Biscuit curls up first (goodnight lines can see it)
+    const gn = sleepLine(STORY.sleepLines?.goodnight);
+    if (gn) ambient.sayNow(gn, 'goodnight');
+    fadeEl.classList.add('on');
+    setTimeout(() => {
+      dayNight.tod = DN.morning; lastTod = DN.morning; lastTimeWord = 'day'; dayCount++; // skip to morning (fires aren't simulated overnight)
+      if (warmth < 60) warmth = 60;
+      dayNight.update(0, { advance: false, camPos: camera.getWorldPosition(_camPos), hemi, fog: scene.fog, scene, caveDensity: scene.fog.density });
+      game.lastNight = { day: dayCount };
+      saveNow('sleep');
+      setTimeout(() => {
+        fadeEl.classList.remove('on'); sleeping = false;
+        input.enabled = true;
+        const gm = sleepLine(STORY.sleepLines?.goodMorning);
+        if (gm) ambient.sayNow(gm, 'goodMorning');
+        hud.toast(`☀ Day ${dayCount}`, 2.4);
+      }, 900);
+    }, 1700);
+  }
+  onTap(document.getElementById('sleep-yes'), () => doSleep());
+  onTap(document.getElementById('sleep-no'), () => closeSleep());
+  onTap(document.getElementById('sleep-close'), () => closeSleep());
+  invUI.onEat = () => { if (running && !paused) eatStew(); };
 
   // hold-to-gather: hold Use on the targeted tree/rock, or press and hold on it (touch)
   let hold = null;
@@ -569,6 +698,7 @@ async function init() {
       const bp = build.pickScreen(t.x, t.y, camera, player.pos);
       if (bp && !build.active) {
         if (bp.type === 'door') { const open = build.toggleDoor(bp); audio.blip(open ? 240 : 200); }
+        else if (bp.type === 'bedroll') openSleep();
         else openChest(bp);
         continue;
       }
@@ -590,7 +720,8 @@ async function init() {
       if (!memory.hasFact(`Cam explored ${area.name}`) && area !== lanternmouth) {
         memory.addFact('milestone', `Cam explored ${area.name}`, 2);
       }
-      if (area !== lanternmouth) ambient.trigger('new_area');
+      if (area.surface) ambient.trigger('enter_clearing', { force: !visited.has(area.id) });
+      else if (area !== lanternmouth) ambient.trigger('new_area');
       if (!visited.has(area.id)) { visited.add(area.id); if (area !== lanternmouth) puppy.bark('area'); }
     }
     if (area) currentArea = area; else if (currentArea && cave.field(player.pos.x, player.pos.z) < 2.6) currentArea = null;
@@ -615,12 +746,19 @@ async function init() {
       if (near(decor.mushrooms)) ambient.trigger('found_mushroom');
       if (near(decor.crystals)) { ambient.trigger('found_crystal'); memory.addFact('find', 'Cam saw the humming purple crystals', 1); }
     }
-    // night cycle
-    const before = timeOfNight();
-    clock += dt;
-    const after = timeOfNight();
-    if (before !== after && (after === 'deep night' || after === 'quiet hour')) ambient.trigger('night_deepens');
-    if (Math.floor((clock - dt) / CYCLE) !== Math.floor(clock / CYCLE)) { dayCount++; ambient.trigger('morning'); }
+    // Chunk C: day/night + weather (DayNight advances the clock in the frame loop)
+    const tw = timeWord(dayNight.tod);
+    if (tw === 'deep_night' && lastTimeWord !== 'deep_night') ambient.trigger('night_deepens');
+    if (dayNight.tod < lastTod - DAY_CYCLE / 2) { dayCount++; ambient.trigger('morning'); } // stayed up all night
+    lastTimeWord = tw; lastTod = dayNight.tod;
+    const onSurface = dayNight.b > 0.5;
+    if (dayNight.weather === 'rain' && lastWeather !== 'rain') { rainSpell++; if (dayNight.b > 0.02 || cave.depthIntoCave(player.pos.x, player.pos.z) < 14) ambient.trigger('rain_start', { force: true }); }
+    lastWeather = dayNight.weather;
+    if (dayNight.rainK > 0.5 && onSurface && build.underRoof(player.pos) && roofSpell !== rainSpell) { roofSpell = rainSpell; ambient.trigger('rain_on_roof', { force: true }); }
+    const nightNo = dayCount * 2 + (dayNight.tod >= DN.dayEnd ? 1 : 0);
+    if (currentArea?.surface && dayNight.starAlpha > 0.6 && starsNight !== nightNo) { starsNight = nightNo; ambient.trigger('stars_visible', { force: true }); }
+    // warmth: cold brings only a cozy nudge (frost vignette, Wren's line, Biscuit pressing close)
+    updateWarmth(dt, onSurface);
     // idle + Biscuit
     if (player.stillTime > 40) ambient.trigger('idle');
     while (puppy.events.length) {
@@ -642,6 +780,43 @@ async function init() {
     }
     // 10 minutes idle ends the session
     if (sessionOpen && performance.now() - lastActivity > 10 * 60 * 1000) endSession('idle');
+  }
+
+  let lastTimeWord = null, lastTod = 0, lastWeather = 'clear', rainSpell = 0, roofSpell = -1, starsNight = -1;
+  const warmEl = document.getElementById('warmth'), warmFill = warmEl.querySelector('.fill'), frostEl = document.getElementById('frost'), todIco = document.getElementById('tod-ico');
+  let warmUi = -1;
+  function updateWarmth(dt, onSurface) {
+    const lit = fires.nearest(player.pos, Infinity, true);
+    const nearFire = lit && Math.hypot(lit.pos.x - player.pos.x, lit.pos.z - player.pos.z) < lit.lightRadius * 0.8;
+    const sheltered = build.inShelter(player.pos);
+    const night = dayNight.nightness > 0.5 || timeWord(dayNight.tod) !== 'day';
+    const rain = dayNight.rainK > 0.4 && !build.underRoof(player.pos);
+    let rate;
+    if (nearFire) rate = WC.nearFire;
+    else if (sheltered) rate = WC.shelter;
+    else if (stewHold > 0) rate = 0;
+    else if (onSurface && night && rain) rate = -WC.both;
+    else if (onSurface && rain) rate = -WC.rainSurface;
+    else if (onSurface && night) rate = -WC.nightSurface;
+    else rate = -WC.drift;
+    stewHold = Math.max(0, stewHold - dt);
+    warmth = Math.min(100, Math.max(0, warmth + rate * dt));
+    const prev = warmWord;
+    if (warmth < WC.cold) warmWord = 'cold';
+    else if (warmth > WC.warm) warmWord = 'warm';
+    else if (warmWord === 'cold' && warmth > WC.cold + 8) warmWord = 'ok';
+    else if (warmWord === 'warm' && warmth < WC.warm - 8) warmWord = 'ok';
+    if (warmWord === 'cold' && prev !== 'cold') ambient.trigger('warmth_cold', { force: true });
+    puppy.snuggle = warmWord === 'cold' && !nearFire;
+    const pct = Math.round(warmth);
+    if (pct !== warmUi) {
+      warmUi = pct; warmFill.style.width = `${pct}%`;
+      warmEl.classList.toggle('cold', warmWord === 'cold');
+      warmEl.title = `Warmth: ${warmWord}`;
+    }
+    frostEl.style.opacity = warmWord === 'cold' ? String(Math.min(1, 0.55 + (WC.cold - warmth) / 40)) : '0';
+    const ico = dayNight.weather === 'rain' && dayNight.rainK > 0.3 ? '🌧' : timeWord(dayNight.tod) === 'day' ? '☀' : timeWord(dayNight.tod) === 'dusk' ? '🌇' : '🌙';
+    if (todIco.textContent !== ico) todIco.textContent = ico;
   }
 
   function updateFog(dt) {
@@ -717,6 +892,8 @@ async function init() {
       items.update(dt, ctxAction?.kind === 'pick' ? ctxAction.it : null, player.pos);
       harvest.update(dt, player.pos);
       updateTriggers(dt);
+      const cooked = cooking.update(dt, player.pos);
+      for (const pot of cooked) { hud.toast('🍲 Stew is ready! Use to take it', 2.4); audio.blip(820); }
       updateRequests(dt);
       ambient.update(dt);
       if (performance.now() - lastSaveAt > 30000) saveNow('auto');
@@ -751,13 +928,20 @@ async function init() {
     dressing.update(dt, { anyFireLit: anyLit });
     budget.update(dt, camera.getWorldPosition(_camPos));
     updateFog(dt);
+    // Chunk C: surface day/night + weather over the §8.1 cave ambient (blend by depth into the cave)
+    const cp = camera.getWorldPosition(_camPos);
+    dayNight.update(dt, { advance: running && !sleeping, camPos: cp, hemi, fog: scene.fog, scene, fireK: ambientLight.k, caveDensity: scene.fog.density, renderer });
+    surface.update(dt, cp); instCull.update(dt, camera);
+    if (!running) cooking.update(0, cp);
+    audio.rain?.(dayNight.rainK * dayNight.b, build.underRoof(player.pos));
     updateHint();
     hud.update(dt, renderer);
     input.clearFrame();
     renderer.render(scene, camera);
   }
 
-  Object.assign(game, { THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
+  Object.assign(game, { dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });

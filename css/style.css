@@ -161,3 +161,19 @@ body.building .build-only { display: flex; }
 .slot.action { border-style: dashed; }
 .slot.action.cant { opacity: 0.45; }
 body.on-title #hud > *:not(#fps), body.on-title #hotbar, body.on-title #palette { visibility: hidden; }
+
+/* Chunk C: warmth meter + time of day, frost vignette (cold nudge), sleep fade */
+#warmth { position: absolute; top: calc(10px + var(--sat)); right: calc(62px + var(--sar)); display: flex; align-items: center; gap: 5px; background: var(--panel); border-radius: 12px; padding: 5px 9px; font-size: 13px; }
+#fps:not(.hidden) ~ #warmth { right: calc(110px + var(--sar)); }
+#warmth .tod { font-size: 14px; }
+#warmth .ico { font-size: 12px; opacity: 0.85; }
+#warmth .bar { width: 64px; height: 6px; background: #1c2430; border-radius: 3px; overflow: hidden; }
+#warmth .fill { height: 100%; width: 80%; background: linear-gradient(90deg, #7fb6e8, #ffb35c 55%, #ff7a2a); transition: width 0.6s; }
+#warmth.cold .fill { background: #9fd0ff; }
+#warmth.cold { box-shadow: 0 0 0 1px rgba(159,208,255,0.6); }
+#frost { position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 1.5s;
+  background: radial-gradient(ellipse at center, rgba(180,215,255,0) 55%, rgba(190,222,255,0.28) 78%, rgba(225,240,255,0.6) 100%); }
+#fade { position: fixed; inset: 0; z-index: 9; pointer-events: none; background: #05070b; opacity: 0; transition: opacity 1.4s ease; }
+#fade.on { opacity: 1; pointer-events: auto; }
+#sleep { z-index: 7; width: min(340px, calc(100vw - 40px)); }
+body.on-title #warmth { visibility: hidden; }

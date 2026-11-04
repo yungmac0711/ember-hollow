@@ -29,7 +29,7 @@ export class InventoryUI {
     this.tip = $('tip');
     this.ringFill = this.ring.querySelector('.fill'); this.ringIco = this.ring.querySelector('.ico');
     this.selected = 'wood'; this._last = {}; this.openPanel = null;
-    this.onPanel = onPanel; this.onSelect = onSelect; this.onReadNote = onReadNote;
+    this.onPanel = onPanel; this.onSelect = onSelect; this.onReadNote = onReadNote; this.onEat = null;
     this.isAvailable = isAvailable || ((t) => !PIECES[t].locked && !PIECES[t].decor && !PIECES[t].keepsake);
     this.journal = []; // [{id, title}]
     const stop = (e) => { e.stopPropagation(); };
@@ -39,7 +39,12 @@ export class InventoryUI {
       const b = document.createElement('button');
       b.className = 'slot'; b.dataset.kind = k; b.title = `${label(k)} · ${desc(k)}`;
       b.innerHTML = `${icon(k)}<span class="n">0</span>`;
-      b.addEventListener('pointerdown', (e) => { stop(e); e.preventDefault(); this.select(k); this.showTip(k, b); });
+      // Chunk C: tapping the stew slot again once it's selected eats a bowl (pointerdown, never click — iOS)
+      b.addEventListener('pointerdown', (e) => {
+        stop(e); e.preventDefault();
+        const again = this.selected === k; this.select(k);
+        if (again && k === 'stew') this.onEat?.(); else this.showTip(k, b);
+      });
       this.hotbar.appendChild(b); this.slots[k] = b;
     }
     // Biscuit's stick: a free hotbar action (not the wood item) — tap to throw

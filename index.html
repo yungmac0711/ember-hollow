@@ -42,6 +42,7 @@
     <div id="woof">woof!</div>
     <div id="request" class="hidden"><div class="rq-title"></div><div class="rq-needs"></div><button class="rq-give hidden" id="rq-give">Give to Wren</button></div>
     <div id="fps" class="hidden"></div>
+    <div id="warmth" aria-label="Warmth"><span class="tod" id="tod-ico">☀</span><span class="ico">🌡</span><div class="bar"><div class="fill"></div></div></div>
     <button id="btn-pause" aria-label="Pause">⏸</button>
 
     <div id="joystick" class="hidden"><div class="knob"></div></div>
@@ -82,6 +83,17 @@
       <p class="pause-note" id="pause-note"></p>
     </div>
   </div>
+
+  <div id="sleep" class="panel hidden" role="dialog" aria-label="Sleep">
+    <div class="panel-head"><span>Bed roll</span><button class="panel-close" id="sleep-close" aria-label="Close">✕</button></div>
+    <div class="panel-body pause-body">
+      <p class="pause-note" id="sleep-note">Sleep until morning?</p>
+      <button class="tbtn" id="sleep-yes">Sleep till morning</button>
+      <button class="tbtn" id="sleep-no">Not yet</button>
+    </div>
+  </div>
+  <div id="frost" aria-hidden="true"></div>
+  <div id="fade" aria-hidden="true"></div>
 
   <div id="reader" class="hidden" role="dialog" aria-label="Note">
     <div class="parchment">

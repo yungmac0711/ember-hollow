@@ -45,12 +45,12 @@ class Particles {
     this.points.frustumCulled = false;
     for (let i = 0; i < count; i++) { this.life[i] = 1; this.age[i] = Math.random(); }
   }
-  update(dt, origin, rate, colorFn, drift) {
+  update(dt, origin, rate, colorFn, drift, max = Infinity) {
     const p = this.pos, v = this.vel, c = this.col;
     for (let i = 0; i < this.count; i++) {
       this.age[i] += dt;
       if (this.age[i] >= this.life[i]) {
-        if (Math.random() > rate) { p[i * 3 + 1] = -999; this.age[i] = this.life[i] - 0.05 - Math.random() * 0.2; continue; }
+        if (i >= max || Math.random() > rate) { p[i * 3 + 1] = -999; this.age[i] = this.life[i] - 0.05 - Math.random() * 0.2; continue; }
         this.spawn(i, origin, p, v, this.life);
         this.age[i] = 0;
       }
@@ -135,6 +135,8 @@ export class Campfire {
     this._origin = origin;
     this.group.add(this.flameP.points, this.emberP.points);
     this._t = Math.random() * 10;
+    this.sparkCap = Infinity; // Chunk C: a cooking pot caps sparks at 12 (+18 steam = ≤30 particles)
+    this.potOn = false;       // flames tuck down inside the pot
   }
 
   get lit() { return this.fuel > 0; }
@@ -156,7 +158,7 @@ export class Campfire {
     const flick = 0.85 + Math.sin(this._t * 13) * 0.06 + Math.sin(this._t * 7.3) * 0.06 + Math.random() * 0.05;
     this.flames.forEach((f, i) => {
       f.visible = st > 0;
-      const k = st * flick * (1 + Math.sin(this._t * (9 + i * 3)) * 0.12);
+      const k = st * flick * (1 + Math.sin(this._t * (9 + i * 3)) * 0.12) * (this.potOn ? 0.72 : 1);
       f.scale.set(k, k * (1 + Math.sin(this._t * 11 + i) * 0.15), k);
       f.rotation.y += dt * (1 + i);
     });
@@ -166,7 +168,7 @@ export class Campfire {
     const white = (k, c, j) => { c[j] = 1 - k * 0.3; c[j + 1] = 0.82 - k * 0.6; c[j + 2] = 0.48 - k * 0.4; const f = (1 - k) * 0.9; c[j] *= f; c[j + 1] *= f; c[j + 2] *= f; };
     const ember = (k, c, j) => { const f = (1 - k) * (0.6 + Math.random() * 0.4); c[j] = 1 * f; c[j + 1] = 0.45 * f; c[j + 2] = 0.1 * f; };
     this.flameP.update(dt, this._origin, st > 0 ? 1 : 0, white, 0.5);
-    this.emberP.update(dt, this._origin, st > 0 ? 0.9 : 0.04, ember, 1.6);
+    this.emberP.update(dt, this._origin, st > 0 ? 0.9 : 0.04, ember, 1.6, this.sparkCap);
     this.flicker = flick;
   }
 }
