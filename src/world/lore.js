@@ -4,8 +4,9 @@
 // primitive bits for the hints (a rock, a mossy stump with a pebble, a flat stone). All props are
 // merged into one vertex-coloured mesh (+1 unlit mesh for the emissive glowcaps: 2 draw calls total). Cam reads a note with Use when near it or
 // by tapping it; the parchment reader (ui/parchment_reader.png, 9-slice) shows it, it's marked read
-// (saved) and added to the journal in the pack. Glowmere and the clearing aren't built yet, so their
-// two notes are not placed (known issue, M1_PLAN decisions).
+// (saved) and added to the journal in the pack. Chunk C places the clearing note as a carving on a
+// birch at the clearing edge (spot from src/world/surface.js). Glowmere isn't built yet, so its note
+// is still not placed (known issue, M1_PLAN decisions).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STORY } from '../data/story.js';
@@ -99,11 +100,22 @@ export class LoreNotes {
         add(props.journal, mat(s.x, s.y + 0.165, s.z, s.yaw + 0.4));
         return { ...s, y: s.y + 0.2 };
       },
+      // "On a birch trunk at the edge of the clearing." — a pale bark blaze with carved lines, at chest
+      // height on the side facing the clearing (Chunk C; the birch itself is a deco tree in surface.js)
+      note_clearing_stars: () => {
+        const b = props.clearingBirch; if (!b) return null;
+        const fx = Math.sin(b.yaw), fz = Math.cos(b.yaw), r = b.trunkR + 0.005;
+        const x = b.x + fx * r, z = b.z + fz * r, y = b.y + 1.3;
+        add([prim(new THREE.BoxGeometry(0.2, 0.34, 0.02), 0xd8ccb0)], mat(x, y, z, b.yaw));
+        for (let k = 0; k < 4; k++) add([prim(new THREE.BoxGeometry(0.13 - (k % 2) * 0.04, 0.012, 0.012), 0x5a4632)], mat(x + fx * 0.012, y + 0.1 - k * 0.065, z + fz * 0.012, b.yaw));
+        return { x: x + fx * 0.35, z: z + fz * 0.35, y, yaw: b.yaw };
+      },
     };
     for (const n of STORY.lore.notes || []) {
       const fn = place[n.id];
       if (!fn || !ch[n.area]) { this.skipped = (this.skipped || []).concat(n.id); continue; }
       const s = fn();
+      if (!s) { this.skipped = (this.skipped || []).concat(n.id); continue; }
       this.notes.push({ id: n.id, title: n.title, text: n.text, kind: n.kind, area: n.area, pos: new THREE.Vector3(s.x, s.y, s.z) });
     }
     this.mesh = null;

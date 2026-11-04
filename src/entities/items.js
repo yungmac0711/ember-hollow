@@ -99,6 +99,19 @@ export class Items {
     place2('mushroom', CONFIG.items.mushroom, [mossdrip, glowcapCh, lanternmouth], 0.7);
     place2('glowcap', CONFIG.items.glowcap, [glowcapCh], 0.75);
     place2('crystal_shard', CONFIG.items.crystal_shard, [flintseam], 0.8);
+    // Chunk C: surface pickups in the clearing (own rng stream; cave items unchanged)
+    if (cave.clearing) {
+      const rng3 = mulberry32(seed * 37 + 3), cl = cave.clearing;
+      for (const [kind, count] of [['wood', 6], ['mushroom', 5]]) {
+        for (let i = 0, guard = 0; i < count && guard++ < 200; ) {
+          const p = cave.randomPoint(rng3, 1.0, 99, cl);
+          if (!p || Math.hypot(p.x - cl.x, p.z - cl.z) > cl.r - 2.5) continue;
+          if (this.list.some((o) => Math.hypot(o.pos.x - p.x, o.pos.z - p.z) < 1.2)) continue;
+          this.list.push({ kind, pos: p, rot: rng3() * Math.PI * 2, tilt: rng3(), scale: 0.9 + rng3() * 0.3, alive: true, surface: true });
+          i++;
+        }
+      }
+    }
 
     this.meshes = {};
     const idx = {};
@@ -160,6 +173,16 @@ export class Items {
       bd = d; best = it;
     }
     return best;
+  }
+
+  // ---- save (Chunk C): -1 = lying there, else seconds until it regrows
+  serialize() { return this.list.map((it) => (it.alive ? -1 : Math.max(0, Math.round(it.respawnAt - this._t)))); }
+  restore(arr) {
+    if (!Array.isArray(arr) || arr.length !== this.list.length) return;
+    this.list.forEach((it, i) => {
+      if (arr[i] === -1 || arr[i] == null) return;
+      it.alive = false; this._set(it, ZERO); it.respawnAt = this._t + (+arr[i] || 0);
+    });
   }
 
   /** Items alive per kind (debug / smoke test). */

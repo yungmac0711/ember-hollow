@@ -10,6 +10,9 @@ import { mulberry32 } from '../world/noise.js';
 import { lambert } from '../assets.js';
 
 const HC = CONFIG.harvest;
+// Chunk C: surface tree variants (art/assets/surface, metres) share the root tree's stump mesh.
+const TREE_H = { root: 3.0, pine: 4.2, round: 3.57, birch: 3.2 };
+const TREE_R = { root: 0.34, pine: 0.3, round: 0.3, birch: 0.2 };
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 
@@ -47,7 +50,8 @@ function treeGeometry(rng) {
 
 export class Harvest {
   /** @param rockSources array of loadParts() results (rock-a/b/c), may contain nulls */
-  constructor(scene, cave, seed, colliders, rockSources = []) {
+  /** @param surface {variants: {pine, round, birch: BufferGeometry (vertex colours)}, trees: [{pos, rot, scale, variant, deco}]} */
+  constructor(scene, cave, seed, colliders, rockSources = [], surface = null) {
     this.cave = cave; this.colliders = colliders;
     const rng = mulberry32(seed * 7 + 41);
     this.nodes = [];
@@ -68,7 +72,7 @@ export class Harvest {
         const room = smp.ceil - smp.floor - 0.25;
         const scale = Math.min(1.1, room / 3.4);
         if (scale < 0.7) continue;
-        this.nodes.push({ type: 'tree', pos: p, rot: rng() * Math.PI * 2, scale, alive: true, respawnAt: 0, wobble: 0 });
+        this.nodes.push({ type: 'tree', variant: 'root', pos: p, rot: rng() * Math.PI * 2, scale, alive: true, respawnAt: 0, wobble: 0 });
         i++;
       }
     }
@@ -86,12 +90,26 @@ export class Harvest {
       }
     }
 
+    // --- surface trees (choppable, plus non-choppable deco trees ringing the clearing)
+    if (surface) for (const t of surface.trees) if (surface.variants[t.variant]) {
+      this.nodes.push({ type: 'tree', variant: t.variant, deco: !!t.deco, surface: true, pos: t.pos, rot: t.rot, scale: t.scale, alive: true, respawnAt: 0, wobble: 0 });
+    }
+
     // --- meshes
     const tg = treeGeometry(rng);
     const treeMat = lambert(0xffffff, { vertexColors: true });
-    const nTree = this.nodes.filter((n) => n.type === 'tree').length;
-    this.treeMesh = new THREE.InstancedMesh(tg.full, treeMat, Math.max(1, nTree));
-    this.stumpMesh = new THREE.InstancedMesh(tg.stump, treeMat, Math.max(1, nTree));
+    const trees = this.nodes.filter((n) => n.type === 'tree');
+    const geo = { root: tg.full, ...(surface ? surface.variants : {}) };
+    this.treeMeshes = {};
+    for (const v of Object.keys(geo)) {
+      const n = trees.filter((t) => t.variant === v).length;
+      if (!n || !geo[v]) continue;
+      const m = new THREE.InstancedMesh(geo[v], treeMat, n); m.count = n; m.name = 'tree-' + v;
+      this.treeMeshes[v] = m;
+    }
+    this.treeMesh = this.treeMeshes.root;
+    const nStump = trees.filter((t) => !t.deco).length;
+    this.stumpMesh = new THREE.InstancedMesh(tg.stump, treeMat, Math.max(1, nStump));
     this.rockMeshes = [0].map((v) => { // one variant (rock-b) = one draw call; random yaw/scale for variety
       const src = rockSources[v];
       let parts = src && src.length ? src : null;
@@ -99,25 +117,26 @@ export class Harvest {
       const n = this.nodes.filter((x) => x.type === 'rock' && x.variant === v).length;
       return parts.map((pt) => new THREE.InstancedMesh(pt.geometry, pt.material, Math.max(1, n)));
     });
-    this.meshes = [this.treeMesh, this.stumpMesh, ...this.rockMeshes.flat()];
+    this.meshes = [...Object.values(this.treeMeshes), this.stumpMesh, ...this.rockMeshes.flat()];
     for (const m of this.meshes) { m.frustumCulled = false; scene.add(m); }
-    const idx = { tree: 0, r0: 0 };
+    const idx = { stump: 0, r0: 0 };
     for (const n of this.nodes) {
-      n.index = n.type === 'tree' ? idx.tree++ : idx['r' + n.variant]++;
+      if (n.type === 'tree') { n.index = idx[n.variant] = (idx[n.variant] ?? -1) + 1; n.stumpIndex = n.deco ? -1 : idx.stump++; }
+      else n.index = idx['r' + n.variant]++;
       _q.setFromEuler(_e.set(0, n.rot, 0));
       n.matrix = new THREE.Matrix4().compose(_p.set(n.pos.x, n.pos.y - 0.03, n.pos.z), _q, _s.setScalar(n.scale));
-      n.collider = colliders.circle(n.pos.x, n.pos.z, n.type === 'tree' ? 0.34 * n.scale : 0.42 * n.scale);
-      n.height = n.type === 'tree' ? 3.0 * n.scale : 0.5 * n.scale;
+      n.collider = colliders.circle(n.pos.x, n.pos.z, n.type === 'tree' ? TREE_R[n.variant] * n.scale : 0.42 * n.scale);
+      n.height = n.type === 'tree' ? TREE_H[n.variant] * n.scale : 0.5 * n.scale;
       this._show(n);
     }
-    this.treeMesh.count = this.stumpMesh.count = nTree;
+    this.stumpMesh.count = Math.max(1, nStump);
   }
 
   _show(n, matrix = n.matrix) {
     if (n.type === 'tree') {
-      this.treeMesh.setMatrixAt(n.index, n.alive ? matrix : ZERO);
-      this.stumpMesh.setMatrixAt(n.index, n.alive ? ZERO : n.matrix);
-      this.treeMesh.instanceMatrix.needsUpdate = this.stumpMesh.instanceMatrix.needsUpdate = true;
+      const tm = this.treeMeshes[n.variant];
+      tm.setMatrixAt(n.index, n.alive ? matrix : ZERO); tm.instanceMatrix.needsUpdate = true;
+      if (n.stumpIndex >= 0) { this.stumpMesh.setMatrixAt(n.stumpIndex, n.alive ? ZERO : n.matrix); this.stumpMesh.instanceMatrix.needsUpdate = true; }
       this._cullDirty = true;
     } else {
       for (const m of this.rockMeshes[n.variant]) { m.setMatrixAt(n.index, n.alive ? matrix : ZERO); m.instanceMatrix.needsUpdate = true; }
@@ -130,7 +149,7 @@ export class Harvest {
   findTarget(pos, forward) {
     let best = null, bestScore = Infinity;
     for (const n of this.nodes) {
-      if (!n.alive) continue;
+      if (!n.alive || n.deco) continue;
       const dx = n.pos.x - pos.x, dz = n.pos.z - pos.z, d = Math.hypot(dx, dz);
       if (d > this.cfg(n).reach) continue;
       const facing = d > 0.01 ? (dx * forward.x + dz * forward.z) / d : 1;
@@ -146,7 +165,7 @@ export class Harvest {
     let best = null, bd = Infinity;
     const w = window.innerWidth, h = window.innerHeight;
     for (const n of this.nodes) {
-      if (!n.alive) continue;
+      if (!n.alive || n.deco) continue;
       const d = Math.hypot(n.pos.x - pos.x, n.pos.z - pos.z);
       if (d > this.cfg(n).reach + 1) continue;
       for (const fy of [0.35, 0.7]) {
@@ -185,8 +204,8 @@ export class Harvest {
     this._t += dt;
     if ((this._cull = (this._cull || 0) + dt) > 0.5 || this._cullDirty) { // whole-mesh distance cull
       this._cull = 0; this._cullDirty = false;
-      const near = (pred) => this.nodes.some((n) => pred(n) && Math.hypot(n.pos.x - playerPos.x, n.pos.z - playerPos.z) < 28);
-      this.treeMesh.visible = near((n) => n.type === 'tree' && n.alive);
+      const near = (pred) => this.nodes.some((n) => pred(n) && Math.hypot(n.pos.x - playerPos.x, n.pos.z - playerPos.z) < (n.surface ? 40 : 28));
+      for (const [v, m] of Object.entries(this.treeMeshes)) m.visible = near((n) => n.type === 'tree' && n.variant === v && n.alive);
       this.stumpMesh.visible = near((n) => n.type === 'tree' && !n.alive);
       for (const m of this.rockMeshes[0]) m.visible = near((n) => n.type === 'rock' && n.alive);
     }
@@ -199,10 +218,23 @@ export class Harvest {
         n._shaken = true; n.wobble = 0; // must be re-applied each frame while held
       } else if (n._shaken) { n._shaken = false; this._show(n); }
       if (!n.alive && this._t >= n.respawnAt && Math.hypot(n.pos.x - playerPos.x, n.pos.z - playerPos.z) > 7 && (!this.canRespawn || this.canRespawn(n))) { // never regrow under a built piece
-        n.alive = true; n.collider.on = true; if (n.type === 'tree') n.collider.r = 0.34 * n.scale;
+        n.alive = true; n.collider.on = true; if (n.type === 'tree') n.collider.r = TREE_R[n.variant] * n.scale;
         this._show(n);
       }
     }
+  }
+
+  // ---- save (Chunk C): -1 = standing, else seconds left until regrowth, per node index
+  serialize() { return this.nodes.map((n) => (n.alive ? -1 : Math.max(0, Math.round(n.respawnAt - this._t)))); }
+  restore(arr) {
+    if (!Array.isArray(arr) || arr.length !== this.nodes.length) return;
+    this.nodes.forEach((n, i) => {
+      const v = arr[i];
+      if (v === -1 || v == null || n.deco) return;
+      n.alive = false; n.respawnAt = this._t + (+v || 0); n.wobble = 0;
+      if (n.type === 'rock') n.collider.on = false; else n.collider.r = 0.3 * n.scale;
+      this._show(n);
+    });
   }
 
   counts() { const c = { tree: 0, rock: 0, spent: 0 }; for (const n of this.nodes) n.alive ? c[n.type]++ : c.spent++; return c; }
