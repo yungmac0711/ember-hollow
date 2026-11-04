@@ -86,7 +86,14 @@ export const CONFIG = {
   harvest: {
     tree: { count: 10, seconds: 1.6, yield: { wood: 3 }, respawn: 240, reach: 2.6 },
     rock: { count: 14, seconds: 1.3, yield: { stone: 2 }, flintChance: 0.4, respawn: 200, reach: 2.4 },
+    // M2 chunk B: glowberry bushes (clearing; slow regrowth) and grass tufts / Glowmere reeds (cheap fiber)
+    bush: { seconds: 0.9, yield: { berry: 2 }, respawn: 300, reach: 2.0 },
+    tuft: { seconds: 0.6, yield: { fiber: 1 }, extraChance: 0.5, respawn: 75, reach: 2.0 },
   },
+  // M2 chunk B: tool tiers multiply gather speed (hand 1×, stone 2×, ember 3×; recipes.json toolTier 1/2)
+  tools: { axe: { stone_axe: 2, ember_axe: 3 }, pick: { stone_pick: 2, ember_pick: 3 } },
+  // M2 chunk B: food (eaten from the hotbar — tap the selected slot again): warmth + seconds of no cooling
+  food: { stew: [45, 120], roasted_mushroom: [20, 60], berry_tea: [30, 180], grilled_fish: [35, 120], fish_stew: [55, 180] },
   // Chunk C: warmth (0..100, never harmful — cold only brings a cozy nudge), cooking, weather
   warmth: { start: 80, nearFire: 3, shelter: 1.5, drift: 0.12, nightSurface: 0.3, rainSurface: 0.35, both: 0.5,
     cold: 25, warm: 70, stew: 45, stewHold: 120 },

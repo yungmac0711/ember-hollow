@@ -132,7 +132,17 @@ export class Harvest {
     this.stumpMesh.count = Math.max(1, nStump);
   }
 
+  /** M2 chunk B: gatherables without their own mesh here — glowberry bushes (berries hidden while
+   * picked via onShow) and grass tufts / reeds (fiber). Appended after trees and rocks so old saves line up. */
+  addGatherNodes(list) {
+    for (const g of list) {
+      const n = { type: g.type, variant: 0, pos: g.pos.clone(), rot: 0, scale: 1, alive: true, respawnAt: 0, wobble: 0, gather: true, index: g.index ?? -1,
+        collider: { on: true, r: 0 }, height: g.type === 'bush' ? 0.9 : 0.35 };
+      this.nodes.push(n);
+    }
+  }
   _show(n, matrix = n.matrix) {
+    if (n.gather) { if (!n._shaken || !n.alive) this.onShow?.(n); return; }
     if (n.type === 'tree') {
       const tm = this.treeMeshes[n.variant];
       tm.setMatrixAt(n.index, n.alive ? matrix : ZERO); tm.instanceMatrix.needsUpdate = true;
@@ -191,6 +201,7 @@ export class Harvest {
     const c = this.cfg(n);
     const out = { ...c.yield };
     if (n.type === 'rock' && n.flinty && rng() < c.flintChance) out.flint = 1;
+    if (c.extraChance && rng() < c.extraChance) for (const k of Object.keys(out)) out[k]++;
     n.alive = false; n.respawnAt = this._t + c.respawn; n.wobble = 0;
     if (n.type === 'rock') n.collider.on = false; else n.collider.r = 0.3 * n.scale;
     this._show(n);
@@ -210,7 +221,8 @@ export class Harvest {
       for (const m of this.rockMeshes[0]) m.visible = near((n) => n.type === 'rock' && n.alive);
     }
     for (const n of this.nodes) {
-      if (n.wobble > 0 && n.alive) {
+      if (n.gather) { n.wobble = 0; }
+      else if (n.wobble > 0 && n.alive) {
         const a = Math.sin(this._t * 38) * 0.035 * (0.4 + n.wobble);
         _q.setFromEuler(_e.set(a, n.rot, a * 0.6));
         _m.compose(_p.set(n.pos.x, n.pos.y - 0.03, n.pos.z), _q, _s.setScalar(n.scale));
@@ -227,8 +239,9 @@ export class Harvest {
   // ---- save (Chunk C): -1 = standing, else seconds left until regrowth, per node index
   serialize() { return this.nodes.map((n) => (n.alive ? -1 : Math.max(0, Math.round(n.respawnAt - this._t)))); }
   restore(arr) {
-    if (!Array.isArray(arr) || arr.length !== this.nodes.length) return;
+    if (!Array.isArray(arr) || arr.length > this.nodes.length) return; // M2: older saves are a prefix (gather nodes appended)
     this.nodes.forEach((n, i) => {
+      if (i >= arr.length) return;
       const v = arr[i];
       if (v === -1 || v == null || n.deco) return;
       n.alive = false; n.respawnAt = this._t + (+v || 0); n.wobble = 0;
@@ -237,5 +250,5 @@ export class Harvest {
     });
   }
 
-  counts() { const c = { tree: 0, rock: 0, spent: 0 }; for (const n of this.nodes) n.alive ? c[n.type]++ : c.spent++; return c; }
+  counts() { const c = { tree: 0, rock: 0, bush: 0, tuft: 0, spent: 0 }; for (const n of this.nodes) n.alive ? c[n.type]++ : c.spent++; return c; }
 }

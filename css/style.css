@@ -297,7 +297,33 @@ html.tier-high .panel { -webkit-backdrop-filter: blur(10px) saturate(1.1); backd
 
 /* ---- Settings → Hide HUD (H on a keyboard): only a faint pause button stays ---- */
 body.hud-hidden #hotbar, body.hud-hidden #palette, body.hud-hidden #buttons, body.hud-hidden #hud-tl, body.hud-hidden #crosshair,
-body.hud-hidden #btn-bag, body.hud-hidden #btn-build, body.hud-hidden #btn-chat, body.hud-hidden #toast { visibility: hidden; }
+body.hud-hidden #btn-bag, body.hud-hidden #btn-build, body.hud-hidden #btn-craft, body.hud-hidden #btn-chat, body.hud-hidden #toast { visibility: hidden; }
 body.hud-hidden #btn-pause { opacity: .3; }
 .srow { min-height: 36px; }
 .settings-body { gap: 6px; }
+
+/* M2 chunk B: crafting panel — dark glass cards, thumb-sized tabs and Craft buttons */
+#craftui { width: min(600px, calc(100vw - 40px - var(--sal) - var(--sar))); }
+.craft-tabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px 12px 0; overflow-x: auto; touch-action: pan-x; }
+.craft-tab { flex: 1 0 auto; min-height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(224,138,46,.25); background: rgba(10,14,20,.45); color: var(--text); font: inherit; font-size: 14px; }
+.craft-tab.sel { border-color: var(--eh-ember, #ff7a1a); background: rgba(224,138,46,.18); box-shadow: inset 0 0 8px rgba(255,122,26,.3); }
+#craft-list { display: flex; flex-direction: column; gap: 8px; }
+.craft-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: rgba(8,11,16,.45); border: 1px solid rgba(255,179,92,.1); }
+.craft-card.can { border-color: rgba(255,179,92,.35); }
+.craft-card.locked { opacity: .6; }
+.craft-card.made { animation: craftMade .5s ease-out; }
+@keyframes craftMade { 0% { box-shadow: 0 0 0 0 rgba(255,154,60,.7); } 100% { box-shadow: 0 0 0 10px rgba(255,154,60,0); } }
+.craft-ico { flex: 0 0 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+.craft-ico .ico-img { width: 40px; height: 40px; } .craft-ico .ico-sp { --is: 40px; }
+.craft-main { flex: 1; min-width: 0; }
+.craft-name { font-weight: 700; font-size: 14px; }
+.craft-own { margin-left: 6px; font-weight: 400; font-size: 11px; opacity: .7; }
+.craft-desc { font-size: 11.5px; opacity: .7; margin: 1px 0 3px; }
+.craft-ings { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; }
+.craft-ings .ci { display: inline-flex; align-items: center; gap: 3px; }
+.craft-ings .ci .sm, .craft-lock .sm { --is: 16px; width: 16px; height: 16px; font-size: 13px; }
+.craft-ings .ci.ok { color: #9fe0a8; } .craft-ings .ci.no { color: #f0a38f; }
+.craft-act { flex: 0 0 auto; }
+.craft-go { min-width: 72px; min-height: 40px; border-radius: 10px; border: 1.5px solid var(--eh-ember, #ff7a1a); background: rgba(224,138,46,.22); color: var(--text); font: inherit; font-weight: 700; touch-action: none; }
+.craft-go[disabled] { border-color: rgba(255,255,255,.15); background: rgba(255,255,255,.04); opacity: .55; }
+.craft-lock { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; opacity: .8; max-width: 120px; text-align: right; }

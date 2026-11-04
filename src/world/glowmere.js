@@ -103,6 +103,7 @@ export class Glowmere {
       if (Math.abs(Math.atan2(Math.sin(a - tunnelAng - 0.35), Math.cos(a - tunnelAng - 0.35))) < 0.35) continue; // keep the view clear
       const rr = L.r - 0.3 + rng() * 0.6, x = L.x + Math.cos(a) * rr, z = L.z + Math.sin(a) * rr;
       bake(P.reeds, mat4(x, Math.min(cave.floorAt(x, z), wy) - 0.05, z, rng() * 6.28, 0.9 + rng() * 0.6), plain, glow, 1.3);
+      (this.reeds ||= []).push(new THREE.Vector3(x, cave.floorAt(x, z), z)); // M2 chunk B: fiber (harvest 'tuft')
     }
     // --- lily pads floating on the water ------------------------------------------------------------
     for (let i = 0; i < 10; i++) {

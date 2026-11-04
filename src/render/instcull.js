@@ -26,6 +26,12 @@ export class InstanceCuller {
     this.sets.push({ im, n, sph, mat: im.instanceMatrix.array.slice(0, n * 16), col: im.instanceColor ? im.instanceColor.array.slice(0, n * 3) : null, d0: maxDist, d2: (maxDist * this.scale) ** 2 });
   }
 
+  /** M2 chunk B: change one instance's matrix after build (glowberries picked / regrown). */
+  setMatrix(im, i, m) {
+    const r = this.sets.find((x) => x.im === im);
+    if (!r) { im.setMatrixAt(i, m); im.instanceMatrix.needsUpdate = true; return; }
+    m.toArray(r.mat, i * 16); this._t = 1;
+  }
   addAll(root, maxDist) { root.traverse((o) => { if (o.isInstancedMesh && o.frustumCulled !== false) this.add(o, maxDist); }); }
 
   update(dt, camera, force = false) {

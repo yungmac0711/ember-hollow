@@ -24,7 +24,7 @@ export class HUD {
   /** M2 chunk A: small translucent buttons drawn from Art's ui_ glyphs (call once the atlas is loaded). */
   initGlyphs() {
     const glyph = (id, key, alt) => { const el = $(id); if (el) el.innerHTML = iconHtml(key) || alt; };
-    glyph('btn-pause', 'ui_menu', '⏸'); glyph('btn-build', 'ui_craft', '🔨');
+    glyph('btn-pause', 'ui_menu', '⏸'); glyph('btn-build', 'ui_craft', '🔨'); glyph('btn-craft', 'crafting_bench', '🛠');
     $('btn-chat').innerHTML = '<span class="ico">💬</span>';
     const w = $('warmth'); w.querySelector('.ico').innerHTML = iconHtml('ui_warmth');
     this.fuel.querySelector('.ico').textContent = '🔥';

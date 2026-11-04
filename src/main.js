@@ -34,6 +34,7 @@ import { onTap } from './ui/tap.js';
 import { Harvest } from './entities/harvest.js';
 import { Colliders } from './world/colliders.js';
 import { InventoryUI, HOTBAR } from './ui/inventory-ui.js';
+import { CraftUI, unlockState, ingredientsOf, outKey } from './ui/craft-ui.js';
 import { HUD } from './ui/hud.js';
 import { GameAudio } from './audio.js';
 import { loadModel, loadParts, loadScene } from './assets.js';
@@ -160,6 +161,13 @@ async function init() {
   const glowmere = new Glowmere(scene, cave, seed, gmP, colliders);
   const fireflies = new Fireflies(scene, seed);
   const harvest = new Harvest(scene, cave, seed, colliders, [rockA], { variants: treeVariants(surfParts), trees: surface.trees });
+  // M2 chunk B: berries from the clearing's glowberry bushes, fiber from grass tufts + Glowmere reeds
+  harvest.addGatherNodes([
+    ...(surface.glowberries || []).map((b, i) => ({ type: 'bush', index: i, pos: new THREE.Vector3(b.x, b.y, b.z) })),
+    ...(surface.tufts || []).map((t) => ({ type: 'tuft', pos: new THREE.Vector3(t.x, t.y, t.z) })),
+    ...(glowmere.reeds || []).map((r) => ({ type: 'tuft', pos: r })),
+  ]);
+  harvest.onShow = (n) => { if (n.type === 'bush') surface.setBerries(n.index, n.alive, instCull); };
   const cooking = new Cooking(scene, stewPotP);
   const dayNight = new DayNight(scene, cave, budget, { low: CONFIG.debug.low });
   dayNight.setProjection(camera);
@@ -287,7 +295,8 @@ async function init() {
     onReadNote: (id) => openNote(id),
     isAvailable: (t, inv) => {
       const P = PIECES[t];
-      if (P.decor || P.keepsake) return (inv[t] || 0) > 0;
+      if ((inv[t] || 0) > 0) return true; // M2 chunk B: anything crafted into the pack can be placed
+      if (P.decor || P.keepsake || P.craft) return false;
       if (P.locked) return requests.unlocked.has(t);
       return true;
     },
@@ -299,6 +308,47 @@ async function init() {
     },
   });
   invUI.bindInventory(player.inventory);
+  // ------------------------------------------------------------ M2 chunk B: crafting
+  const craftUI = new CraftUI({
+    getInv: () => player.inventory,
+    onCraft: (r) => craft(r),
+    onPanel: (open) => {
+      if (open) { invUI.close(); input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); }
+      else { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches && running) input.requestPointerLock(); }
+    },
+  });
+  /** Bench / lit-fire cooking pot near Cam → that station, else 'hand'. */
+  function nearStation() {
+    let best = null, bd = 2.8;
+    for (const p of build.pieces) {
+      if (p.type !== 'crafting_bench' && p.type !== 'cooking_pot') continue;
+      const d = Math.hypot(p.x - player.pos.x, p.z - player.pos.z);
+      if (d < bd && (p.type === 'crafting_bench' || potLit(p))) { bd = d; best = p; }
+    }
+    return best ? (best.type === 'crafting_bench' ? 'bench' : 'cooking_pot') : 'hand';
+  }
+  const potLit = (p) => !!fires.nearest(new THREE.Vector3(p.x, p.y, p.z), 2.6)?.lit;
+  function craft(r) {
+    const inv = player.inventory;
+    if (!unlockState(r).ok) return { ok: false, why: 'locked' };
+    if (r.station !== 'hand' && r.station !== craftUI.station) return { ok: false, why: 'station' };
+    const ing = ingredientsOf(r);
+    if (!ing.every((i) => (inv[i.item] || 0) >= i.count)) { hud.toast('Not enough yet', 1.4); return { ok: false, why: 'missing' }; }
+    let spot = null;
+    if (r.output.id === 'campfire') { spot = canBuildFireHere(); if (!spot) { hud.toast('Find a clear, flat spot for the fire', 1.8); return { ok: false, why: 'spot' }; } }
+    for (const i of ing) inv[i.item] -= i.count;
+    const key = outKey(r), n = r.output.count || 1, name = r.name;
+    if (spot) { fires.build(spot, FC.woodToBuild); hud.toast('🔥 Campfire lit!', 2.2); audio.pop(1); ambient.trigger('fire_lit'); craftUI.close(); }
+    else inv[key] = (inv[key] || 0) + n;
+    if (key === 'waylamp') { lantern.has = true; lantern.on = true; hud.toast('🏮 The waylamp takes the hand lantern’s place', 2.4); }
+    else if (!spot) hud.toast(`+${n} ${name.toLowerCase()}${PIECES[key] ? ' · place it from 🔨' : ITEM_INFO[key]?.food ? ' · tap it twice to eat' : ''}`, 1.8);
+    audio.blip(r.station === 'cooking_pot' ? 700 : 600);
+    if (r.station === 'cooking_pot') ambient.trigger('stew_cooking', { force: false });
+    game.crafted = (game.crafted || 0) + 1; game.lastCraft = { id: r.id, t: game.time };
+    invUI.setInventory(inv);
+    return { ok: true };
+  }
+  onTap(document.getElementById('btn-craft'), () => { if (!running || paused) return; if (craftUI.isOpen) craftUI.close(); else { if (build.active) { build.toggle(); hud.setBuildActive(false); hud.setRemoveActive(false); invUI.setBuildMode(false, build.selected, player.inventory); } craftUI.open(nearStation()); } });
   function moveItems(from, to, k) {
     if (!from || !to || !(from[k] > 0)) return;
     to[k] = (to[k] || 0) + from[k]; from[k] = 0; audio.blip(560);
@@ -554,11 +604,10 @@ async function init() {
     let node = harvest.findTarget(player.pos, fwd);
     const bp = build.findInteractable(player.pos, fwd);
     if (node && bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z)) node = null; // nearer one wins
-    if (node) return { label: node.type === 'tree' ? 'Hold: chop' : 'Hold: break', kind: 'harvest', node };
+    if (node) return { label: { tree: 'Hold: chop', rock: 'Hold: break', bush: 'Hold: pick berries', tuft: 'Hold: pull fiber' }[node.type], kind: 'harvest', node };
     const seat = findSeat();
     if (seat && !(bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < seat.d)) return { label: seat.label, kind: 'sit', seat };
-    if (bp) return bp.type === 'door' ? { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp }
-      : bp.type === 'bedroll' ? { label: 'Sleep', kind: 'sleep', piece: bp } : { label: 'Open chest', kind: 'chest', piece: bp };
+    if (bp) return pieceAction(bp);
     // Chunk C: cooking on a lit campfire / hearth (selecting a mushroom or glowcap puts cooking first)
     const cf = fires.nearest(player.pos, 2.2);
     if (cf) {
@@ -573,7 +622,7 @@ async function init() {
     const dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
     const db = Math.hypot(puppy.pos.x - player.pos.x, puppy.pos.z - player.pos.z);
     if (db < 1.8) return { label: `Pet ${CONFIG.puppy.name}`, kind: 'pet' };
-    if (invUI.selected === 'stew' && inv.stew > 0) return { label: 'Eat stew', kind: 'eat' };
+    if (ITEM_INFO[invUI.selected]?.food && inv[invUI.selected] > 0) return { label: `Eat ${ITEM_INFO[invUI.selected].label}`, kind: 'eat', food: invUI.selected };
     if (inv.wood >= FC.woodToBuild && inv.flint >= FC.flintToBuild) {
       const spot = canBuildFireHere();
       if (spot) return { label: 'Light fire', kind: 'fire', spot };
@@ -582,6 +631,44 @@ async function init() {
     return null;
   }
 
+  /** M2 chunk B: Use / tap on a placed piece. */
+  function pieceAction(bp) {
+    switch (bp.type) {
+      case 'door': return { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp };
+      case 'fence_gate': return { label: bp.openTarget ? 'Close gate' : 'Open gate', kind: 'door', piece: bp };
+      case 'window_shutters': return { label: bp.openTarget ? 'Close shutters' : 'Open shutters', kind: 'door', piece: bp };
+      case 'bedroll': return { label: 'Sleep', kind: 'sleep', piece: bp };
+      case 'crafting_bench': return { label: 'Use bench', kind: 'bench', piece: bp };
+      case 'cooking_pot': return { label: potLit(bp) ? 'Cook' : 'Pot (needs a lit fire)', kind: 'pot', piece: bp };
+      case 'dog_bowl': return { label: bp.filled ? `${CONFIG.puppy.name}'s bowl` : 'Fill bowl', kind: 'bowl', piece: bp };
+      default: return { label: 'Open chest', kind: 'chest', piece: bp };
+    }
+  }
+  const BOWL_FOOD = ['mushroom', 'roasted_mushroom', 'grilled_fish', 'stew', 'glowcap', 'berry'];
+  function usePiece(a) {
+    const p = a.piece;
+    switch (a.kind) {
+      case 'door': { const open = build.toggleDoor(p); audio.blip(open ? 240 : 200); break; }
+      case 'sleep': openSleep(); break;
+      case 'chest': openChest(p); break;
+      case 'bench': audio.blip(420); craftUI.open('bench'); break;
+      case 'pot': if (potLit(p)) { audio.blip(380); craftUI.open('cooking_pot', 'food'); } else hud.toast('The pot needs a lit fire right beside it', 2); break;
+      case 'bowl': {
+        if (p.filled) { hud.toast(`${CONFIG.puppy.name} will get to it`, 1.4); break; }
+        const inv = player.inventory, k = BOWL_FOOD.find((x) => inv[x] > 0);
+        if (!k) { hud.toast(`Nothing to put in ${CONFIG.puppy.name}'s bowl (a mushroom will do)`, 2); break; }
+        inv[k]--; build.setFilled(p, true); audio.blip(560);
+        hud.toast(`You fill ${CONFIG.puppy.name}'s bowl`, 1.6);
+        puppy.bowl = { point: p.eatPoint || new THREE.Vector3(p.x, p.y, p.z), piece: p };
+        break;
+      }
+    }
+  }
+  puppy.onAte = (p) => {
+    if (p && build.pieces.includes(p)) build.setFilled(p, false);
+    hud.toast(`${CONFIG.puppy.name} licks the bowl clean 🐾`, 2);
+    memory.addFact?.('moment', `Biscuit ate from his new bowl`, 1);
+  };
   // Chunk D: places to sit — the Glowmere shore rock, and any placed lakeside bench (sit_point_A/B)
   function benchSeat(p) {
     const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
@@ -589,6 +676,10 @@ async function init() {
     const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw); // the bench faces local +Z (toward the lake)
     const st = new THREE.Vector3(p.x - fx * 0.9, 0, p.z - fz * 0.9);
     return { id: `bench:${p.id}`, bench: true, pos: at(-0.35), yaw: Math.atan2(-fx, -fz), wren: { pos: at(0.35), heading: p.yaw }, stand: st };
+  }
+  function chairSeat(p) { // M2 chunk B: armchair sit_point, facing local +Z
+    const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+    return { id: `chair:${p.id}`, chair: true, pos: p.sitPoint.clone(), yaw: Math.atan2(-fx, -fz), wren: null, stand: new THREE.Vector3(p.x + fx * 0.9, 0, p.z + fz * 0.9) };
   }
   function findSeat() {
     let best = null;
@@ -599,6 +690,7 @@ async function init() {
     const gs = glowmere.seat;
     consider(gs, (gs.pos.x + gs.wren.pos.x) / 2, (gs.pos.z + gs.wren.pos.z) / 2, 'Sit by the water');
     for (const p of build.pieces) if (p.type === 'lakeside_bench') consider(benchSeat(p), p.x, p.z, 'Sit on the bench');
+    for (const p of build.pieces) if (p.type === 'armchair') consider(chairSeat(p), p.x, p.z, 'Sit in the armchair');
     return best;
   }
   function sitDown(seat) {
@@ -614,12 +706,16 @@ async function init() {
     if ((sel === 'mushroom' || sel === 'glowcap') && inv[sel] > 0) return sel;
     return inv.glowcap > 0 ? 'glowcap' : inv.mushroom > 0 ? 'mushroom' : null;
   }
-  function eatStew() {
+  const EAT_LINE = { stew: 'Warm mushroom stew. Toes thawing 🍲', roasted_mushroom: 'Smoky and chewy. A little warmer 🍢', berry_tea: 'Sweet berry tea. Cozy all through 🍵',
+    grilled_fish: 'Crispy grilled fish. Warm and full 🐟', fish_stew: 'Rich fish stew. Toasty to the toes 🍲' };
+  function eatStew(kind = 'stew') {
     const inv = player.inventory;
-    if (!(inv.stew > 0)) return false;
-    inv.stew--; warmth = Math.min(100, warmth + WC.stew); stewHold = WC.stewHold;
-    hud.toast('Warm mushroom stew. Toes thawing 🍲', 2); audio.blip(520);
-    ambient.trigger('stew_eaten', { force: true });
+    if (!(inv[kind] > 0) || !CONFIG.food[kind]) return false;
+    const [w, hold] = CONFIG.food[kind];
+    inv[kind]--; warmth = Math.min(100, warmth + w); stewHold = Math.max(stewHold, hold);
+    hud.toast(EAT_LINE[kind], 2); audio.blip(520);
+    ambient.trigger('stew_eaten', { force: kind === 'stew' });
+    game.lastAte = kind;
     return true;
   }
 
@@ -655,7 +751,7 @@ async function init() {
       }
       case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); break;
       case 'read': openNote(a.note.id); break;
-      case 'eat': eatStew(); break;
+      case 'eat': eatStew(a.food); break;
       case 'sleep': openSleep(); break;
       case 'stew-hang': {
         const pot = cooking.hang(a.fire); if (!pot) break;
@@ -671,8 +767,7 @@ async function init() {
       case 'sit': sitDown(a.seat); break;
       case 'stand': player.stand(); break;
       case 'harvest': break; // hold-driven, see updateHold()
-      case 'door': { const open = build.toggleDoor(a.piece); audio.blip(open ? 240 : 200); break; }
-      case 'chest': openChest(a.piece); break;
+      case 'door': case 'chest': case 'bench': case 'pot': case 'bowl': usePiece(a); break;
       case 'build': {
         const r = build.place(inv);
         if (r.ok) {
@@ -750,8 +845,16 @@ async function init() {
   onTap(document.getElementById('sleep-yes'), () => doSleep());
   onTap(document.getElementById('sleep-no'), () => closeSleep());
   onTap(document.getElementById('sleep-close'), () => closeSleep());
-  invUI.onEat = () => { if (running && !paused) eatStew(); };
+  invUI.onEat = (k) => { if (running && !paused) eatStew(k || 'stew'); };
 
+  /** M2 chunk B: best tool in the pack for a node (hand 1×, stone 2×, ember 3×). */
+  function toolMult(node) {
+    const T = node.type === 'tree' ? CONFIG.tools.axe : node.type === 'rock' ? CONFIG.tools.pick : null;
+    if (!T) return 1;
+    let m = 1; for (const [k, v] of Object.entries(T)) if (player.inventory[k] > 0) m = Math.max(m, v);
+    return m;
+  }
+  game.toolMult = (type) => toolMult({ type });
   // hold-to-gather: hold Use on the targeted tree/rock, or press and hold on it (touch)
   let hold = null;
   function updateHold(dt) {
@@ -768,20 +871,20 @@ async function init() {
     if (node && Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z) > harvest.cfg(node).reach + 0.6) node = null;
     if (!node) { hold = null; invUI.setRing(null); return; }
     if (!hold || hold.node !== node) hold = { node, src, t: 0, tick: 0 };
-    const dur = harvest.cfg(node).seconds;
+    const dur = harvest.cfg(node).seconds / toolMult(node);
     hold.t += dt;
     harvest.shake(node, hold.t / dur);
     if ((hold.tick -= dt) <= 0) { hold.tick = 0.32; audio.blip(node.type === 'tree' ? 180 + Math.random() * 30 : 130 + Math.random() * 25); }
     const sp = src === 'touch' && lh ? lh : harvest.screenPos(node, camera);
-    invUI.setRing(hold.t / dur, sp.x, sp.y, node.type === 'tree' ? '🪓' : '⛏️');
+    invUI.setRing(hold.t / dur, sp.x, sp.y, { tree: '🪓', rock: '⛏️', bush: '🫐', tuft: '🌾' }[node.type]);
     if (hold.t >= dur) {
       const got = harvest.harvest(node);
       for (const [k, n] of Object.entries(got)) inv[k] = (inv[k] || 0) + n;
       hud.toast(Object.entries(got).map(([k, n]) => `+${n} ${ITEM_INFO[k].label}`).join('  '), 1.4);
       audio.blip(node.type === 'tree' ? 520 : 700);
-      const kind = node.type === 'tree' ? 'wood' : 'stone';
+      const kind = { tree: 'wood', rock: 'stone', bush: 'berry', tuft: 'fiber' }[node.type];
       recentFinds.push(kind); if (recentFinds.length > 5) recentFinds.shift();
-      ambient.trigger(foundTrigger(kind));
+      if (node.type === 'tree' || node.type === 'rock') ambient.trigger(foundTrigger(kind));
       if (got.flint) ambient.trigger('found_flint');
       hold = null;
       invUI.setRing(null);
@@ -793,12 +896,7 @@ async function init() {
       const nt = !build.active && lore.pickScreen(t.x, t.y, camera, player.pos);
       if (nt) { openNote(nt.id); continue; }
       const bp = build.pickScreen(t.x, t.y, camera, player.pos);
-      if (bp && !build.active) {
-        if (bp.type === 'door') { const open = build.toggleDoor(bp); audio.blip(open ? 240 : 200); }
-        else if (bp.type === 'bedroll') openSleep();
-        else openChest(bp);
-        continue;
-      }
+      if (bp && !build.active) { usePiece(pieceAction(bp)); continue; }
       ndc.set((t.x / window.innerWidth) * 2 - 1, -(t.y / window.innerHeight) * 2 + 1);
       raycaster.setFromCamera(ndc, camera);
       const hitW = raycaster.intersectObject(wren.hit, false)[0];
@@ -872,6 +970,7 @@ async function init() {
       if (it && !barkedItems.has(it) && ['flint', 'glowcap', 'crystal_shard'].includes(it.kind) && game.time - lastItemBark > 25 && puppy.bark('pickup', it.pos)) { barkedItems.add(it); lastItemBark = game.time; }
       const bed = build.find('biscuit_bed');
       puppy.bed = bed?.sleepPoint || null;
+      if (!puppy.bowl) { const bowl = build.pieces.find((p) => p.type === 'dog_bowl' && p.filled); if (bowl) puppy.bowl = { point: bowl.eatPoint, piece: bowl }; }
     }
     // 10 minutes idle ends the session
     if (sessionOpen && performance.now() - lastActivity > 10 * 60 * 1000) endSession('idle');
@@ -1063,7 +1162,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { craftUI, craft, nearStation, chairSeat, cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });

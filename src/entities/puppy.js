@@ -136,6 +136,7 @@ export class Puppy {
     this.onBark = null;  // (reason) => void — woof bubble + audio hook (main.js)
     this.onDig = null;   // () => void — roll a biscuit_finds.json find (main.js)
     this.bed = null;     // Vector3 sleep point of a placed biscuit_bed, set by main
+    this.bowl = null;    // M2 chunk B: { point: Vector3, piece } — a filled dog bowl he trots over to; onAte(piece) when done
     this.snuggle = false; // Chunk C: Cam is cold → he presses close (main sets this from the warmth meter)
     this._nightSpot = null;
     this.digT = 50 + Math.random() * 40; this.zoomT = 110 + Math.random() * 90; this.barkT = 0;
@@ -242,6 +243,9 @@ export class Puppy {
     if (calm) { this.zoomT -= dt; this.digT -= dt; }
     if (calm && this.zoomT <= 0 && player.stillTime > 1.5) this.startZoomies(player);
     else if (calm && this.digT <= 0 && this.state !== 'follow') this.startDig();
+    // M2 chunk B: a filled bowl nearby → trot over and eat
+    if (this.bowl && ['idle', 'sniffing', 'wander', 'follow', 'lie', 'fireSit', 'curled'].includes(this.state)
+      && Math.hypot(this.bowl.point.x - this.pos.x, this.bowl.point.z - this.pos.z) < 14) this._setState('toBowl');
     // sleep on his bed when Cam settles down nearby
     if (this.bed && player.stillTime > 15 && ['idle', 'sniffing', 'wander', 'lie', 'fireSit', 'curled'].includes(this.state)
       && Math.hypot(this.bed.x - pp.x, this.bed.z - pp.z) < 10) this._setState('toBed');
@@ -278,6 +282,17 @@ export class Puppy {
       const sp = this._nightSpot;
       if (sp) { this.pos.x += (sp.x - this.pos.x) * Math.min(1, dt * 4); this.pos.z += (sp.z - this.pos.z) * Math.min(1, dt * 4); }
       if (this.stateTime > 4 && player.stillTime < 0.5) { this._nightSpot = null; this._setState('playbow'); }
+    } else if (this.state === 'toBowl' || this.state === 'eating') {
+      const b = this.bowl;
+      if (!b) this._setState('idle');
+      else {
+        const d = Math.hypot(b.point.x - this.pos.x, b.point.z - this.pos.z);
+        if (this.state === 'toBowl') { if (d > 0.12) { moveSpeed = Math.min(3.2, 0.8 + d); face = b.point; } else this._setState('eating'); if (this.stateTime > 20) this._setState('idle'); }
+        else {
+          face = b.piece ? { x: b.piece.x, z: b.piece.z } : null;
+          if (this.stateTime > 3.2) { const piece = b.piece; this.bowl = null; this.events.push('ate'); this.onAte?.(piece); this._setState('playbow'); }
+        }
+      }
     } else if (this.state === 'toBed' || this.state === 'sleeping') {
       if (!this.bed || player.stillTime < 0.5) this._setState('idle');
       else {
@@ -375,7 +390,7 @@ export class Puppy {
     const lying = this.state === 'lie' || this.state === 'nightSleep';
     this.sit += ((sitting ? 1 : 0) - this.sit) * Math.min(1, dt * 5);
     this.lie += ((lying ? 1 : 0) - this.lie) * Math.min(1, dt * 3);
-    this.sniff += ((this.state === 'sniffing' || this.state === 'wander' ? 1 : 0) - this.sniff) * Math.min(1, dt * 4);
+    this.sniff += ((this.state === 'sniffing' || this.state === 'wander' || this.state === 'eating' ? 1 : 0) - this.sniff) * Math.min(1, dt * 4);
     this.petTime = Math.max(0, this.petTime - dt);
     this.hop = Math.max(0, this.hop - dt * 2.5);
 
@@ -405,7 +420,7 @@ export class Puppy {
   _animateRig(dt, player) {
     const st = this.state;
     if (this.speed > 3) this._pantT = 4; else this._pantT = Math.max(0, this._pantT - dt);
-    this.sniff += ((st === 'sniffing' || st === 'wander' ? 1 : 0) - this.sniff) * Math.min(1, dt * 4);
+    this.sniff += ((st === 'sniffing' || st === 'wander' || st === 'eating' ? 1 : 0) - this.sniff) * Math.min(1, dt * 4);
     this.petTime = Math.max(0, this.petTime - dt);
     const pose = st === 'curled' || st === 'lie' || st === 'sleeping' || st === 'nightSleep' ? 'curled'
       : st === 'playbow' || st === 'digging' || (st === 'petted' && this.stateTime < 0.9) ? 'playbow'
@@ -434,6 +449,7 @@ export class Puppy {
   _updateStatus(dPlayer) {
     this.status = this.state === 'curled' ? 'curled up asleep by the fire' : this.state === 'playbow' ? 'play-bowing, tail going'
       : this.state === 'fireSit' ? 'sitting by the fire' : this.state === 'lie' ? 'lying down, dozing'
+      : this.state === 'eating' ? 'happily eating from his bowl' : this.state === 'toBowl' ? 'trotting over to his food bowl'
       : this.state === 'sniffing' || this.state === 'wander' ? 'sniffing around' : this.state === 'whine' ? 'whining softly, pressed close'
       : this.state === 'petted' ? 'wagging, just got ear scratches' : this.state === 'sleeping' ? 'asleep in his bed'
       : this.state === 'nightSleep' ? (this._onBed ? 'curled up asleep in his bed' : 'curled up asleep next to Cam') : this.state === 'snuggle' ? 'pressed close against Cam, keeping warm'

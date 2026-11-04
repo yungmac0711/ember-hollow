@@ -51,6 +51,7 @@
       <button id="btn-pause" class="hbtn" aria-label="Pause"></button>
       <button id="btn-bag" class="hbtn" aria-label="Pack"></button>
       <button class="hbtn" id="btn-build" aria-label="Build"></button>
+      <button class="hbtn" id="btn-craft" aria-label="Craft"></button>
       <button class="hbtn" id="btn-chat" aria-label="Talk"></button>
     </div>
 
@@ -72,6 +73,13 @@
   <div id="bag" class="panel hidden" role="dialog" aria-label="Inventory">
     <div class="panel-head"><span>Pack</span><button class="panel-close" data-close="bag" aria-label="Close">✕</button></div>
     <div class="panel-body" id="bag-list"></div>
+  </div>
+
+  <!-- M2 chunk B: crafting panel (src/ui/craft-ui.js) -->
+  <div id="craftui" class="panel hidden" role="dialog" aria-label="Crafting">
+    <div class="panel-head"><span id="craft-title">Craft</span><button class="panel-close" aria-label="Close">✕</button></div>
+    <div id="craft-tabs" class="craft-tabs"></div>
+    <div class="panel-body" id="craft-list"></div>
   </div>
 
   <div id="chestui" class="panel hidden" role="dialog" aria-label="Storage chest">

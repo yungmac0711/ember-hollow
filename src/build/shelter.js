@@ -689,6 +689,7 @@ export class BuildSystem {
     }
     return best;
   }
+  setFilled(p, on) { p.filled = !!on; this._writeAnim(p); }
   toggleDoor(p) { p.openTarget = p.openTarget ? 0 : 1; return !!p.openTarget; }
   setChestOpen(p, on) { p.openTarget = on ? 1 : 0; }
 

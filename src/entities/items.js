@@ -8,6 +8,7 @@ import { mulberry32 } from '../world/noise.js';
 import { lambert } from '../assets.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STORY } from '../data/story.js';
+import { RECIPES } from '../data/recipes.js';
 
 const CULL_DIST = 26; // whole-kind distance cull: no alive item of a kind within this → mesh hidden (saves calls)
 
@@ -27,7 +28,25 @@ export const ITEM_INFO = {
   // M2 chunk A: Cam's starting lantern (story/DATA_FORMATS.md: `hand_lantern`, small and plain, about
   // as bright as Wren's light; the Ch5 `waylamp` replaces it). Tap its hotbar slot to light / stow it.
   hand_lantern: { label: 'hand lantern', icon: '🏮', img: 'hand_lantern', tool: true, desc: 'A small, plain lantern. Plenty of light to find your way.' },
+  // M2 chunk B: gathered (glowberry bushes, grass tufts / Glowmere reeds), tools (bench/forge) and food
+  // (cooking pot). Descriptions: recipes.json `description` (src/data/recipes.js) where there is one.
+  berry: { label: 'glowberry', icon: '🫐', img: 'berry', desc: 'Sweet, faintly glowing berries from the clearing bushes.' },
+  fiber: { label: 'fiber', icon: '🌾', img: 'fiber', desc: 'Tough grass and reed fiber. Good for binding things.' },
+  fish: { label: 'fish', icon: '🐟', img: 'fish', desc: 'A silver lake fish.' },
+  ember_moss: { label: 'ember moss', icon: '🔥', img: 'ember_moss', desc: 'Warm, glowing moss from deep below.' },
+  stone_axe: { label: 'stone axe', icon: '🪓', img: 'stone_axe', tool: 'axe', tier: 2 },
+  stone_pick: { label: 'stone pick', icon: '⛏️', img: 'stone_pick', tool: 'pick', tier: 2 },
+  ember_axe: { label: 'ember axe', icon: '🪓', img: 'ember_axe', tool: 'axe', tier: 3 },
+  ember_pick: { label: 'ember pick', icon: '⛏️', img: 'ember_pick', tool: 'pick', tier: 3 },
+  fishing_rod: { label: 'fishing rod', icon: '🎣', img: 'fishing_rod', tool: 'rod' },
+  waylamp: { label: 'waylamp', icon: '🏮', img: 'waylamp', tool: true },
+  roasted_mushroom: { label: 'roasted mushroom', icon: '🍢', img: 'roasted_mushroom', food: true },
+  berry_tea: { label: 'berry tea', icon: '🍵', img: 'berry_tea', food: true },
+  grilled_fish: { label: 'grilled fish', icon: '🐟', img: 'grilled_fish', food: true },
+  fish_stew: { label: 'fish stew', icon: '🍲', img: 'fish_stew', food: true },
 };
+ITEM_INFO.stew.food = true;
+for (const r of RECIPES) if (ITEM_INFO[r.output.id] && !ITEM_INFO[r.output.id].desc) ITEM_INFO[r.output.id].desc = r.description;
 for (const [k, line] of Object.entries(STORY.itemFlavor.items)) if (ITEM_INFO[k]) ITEM_INFO[k].desc = line;
 export const PICKUP_KINDS = Object.keys(ITEM_INFO).filter((k) => ITEM_INFO[k].pickup);
 

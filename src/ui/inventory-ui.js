@@ -7,7 +7,7 @@ import { onTap } from './tap.js';
 import { PIECES, PIECE_ORDER, KEEPSAKES, costText, iconHtml } from '../build/pieces.js';
 
 const $ = (id) => document.getElementById(id);
-export const HOTBAR = ['wood', 'stone', 'flint', 'mushroom', 'glowcap', 'crystal_shard', 'stew'];
+export const HOTBAR = ['wood', 'stone', 'flint', 'mushroom', 'glowcap', 'crystal_shard', 'berry', 'fiber', 'stew', 'roasted_mushroom', 'berry_tea', 'grilled_fish', 'fish_stew'];
 // M2 chunk A: the slim hotbar only shows what Cam carries (wood/stone/flint keep a ghost slot)
 const ALWAYS = new Set(['wood', 'stone', 'flint']);
 const IDLE_MS = 4000; // then the bar fades to .45 until touched or the pack changes
@@ -52,7 +52,7 @@ export class InventoryUI {
       b.addEventListener('pointerdown', (e) => {
         stop(e); e.preventDefault(); this.wake();
         const again = this.selected === k; this.select(k);
-        if (again && k === 'stew') this.onEat?.(); else this.showTip(k, b);
+        if (again && ITEM_INFO[k]?.food) this.onEat?.(k); else this.showTip(k, b);
       });
       this.hotbar.appendChild(b); this.slots[k] = b;
     }
@@ -158,8 +158,9 @@ export class InventoryUI {
       b.classList.toggle('hidden', !avail);
       if (!avail) continue;
       b.classList.toggle('sel', t === selected);
-      b.classList.toggle('cant', !Object.entries(PIECES[t].cost).every(([k, n]) => (inv[k] || 0) >= n));
-      if (PIECES[t].decor || PIECES[t].keepsake) { const c = b.querySelector('.c'); const n = `×${inv[t] || 0}`; if (c.textContent !== n) c.textContent = n; }
+      b.classList.toggle('cant', !(inv[t] > 0) && !Object.entries(PIECES[t].cost).every(([k, n]) => (inv[k] || 0) >= n));
+      { const c = b.querySelector('.c'), own = PIECES[t].decor || PIECES[t].keepsake || PIECES[t].craft;
+        const n = own || inv[t] > 0 ? `×${inv[t] || 0}` : shortCost(PIECES[t].cost); if (c.textContent !== n) c.textContent = n; }
     }
     const sb = this.pieceBtns[selected];
     if (sb && sb !== this._lastSel) { sb.scrollIntoView?.({ inline: 'nearest', block: 'nearest' }); this._lastSel = sb; }
@@ -189,7 +190,7 @@ export class InventoryUI {
     return `<div class="bag-row" data-kind="${k}">${icon(k)}<span class="n">${n}</span><span><b>${esc(label(k))}</b><br><span class="d">${esc(desc(k))}</span></span></div>`;
   }
   _renderBag(inv) {
-    let rows = Object.keys(ITEM_INFO).filter((k) => k !== 'stew' || inv.stew).map((k) => this._row(k, inv[k] || 0)).join('');
+    let rows = Object.keys(ITEM_INFO).filter((k) => ITEM_INFO[k].pickup || inv[k] > 0).map((k) => this._row(k, inv[k] || 0)).join('');
     const dec = DECOR.filter((k) => inv[k] > 0), ks = KEEPSAKES.filter((k) => inv[k.id] > 0).map((k) => k.id);
     if (dec.length) rows += `<div class="bag-sec">Decorations · place them from 🔨</div>` + dec.map((k) => this._row(k, inv[k])).join('');
     if (ks.length) rows += `<div class="bag-sec">Keepsakes · set them on a table or chest</div>` + ks.map((k) => this._row(k, inv[k])).join('');

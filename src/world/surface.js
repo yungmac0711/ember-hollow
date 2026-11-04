@@ -97,10 +97,19 @@ export class Surface {
     inst(parts.glow, glowB, 'bush-glowberry', true);
     this.glowberries = glowB;
     const nGrass = low ? 16 : 24;
-    parts.grass.forEach((g, k) => inst(g, scatter(nGrass, 1.2, c.r + 0.3, 0.3, 0.05, 0.8, 1.35, 0.15), 'grass-' + (k + 1)));
+    this.tufts = []; // M2 chunk B: every third tuft can be pulled for fiber (harvest 'tuft' nodes)
+    parts.grass.forEach((g, k) => { const sp = scatter(nGrass, 1.2, c.r + 0.3, 0.3, 0.05, 0.8, 1.35, 0.15); sp.forEach((t, i) => { if (i % 3 === k) this.tufts.push(t); }); inst(g, sp, 'grass-' + (k + 1)); });
     this._cull = 1;
   }
 
+  /** M2 chunk B: show / hide the berries (the emissive part) on glowberry bush i. */
+  setBerries(i, on, culler) {
+    const im = this.meshes.find((m) => m.name === 'bush-glowberry-glow'); if (!im) return;
+    if (!this._berryM) { this._berryM = []; for (let k = 0; k < im.count; k++) { const m = new THREE.Matrix4(); im.getMatrixAt(k, m); this._berryM.push(m); } }
+    const m = on ? this._berryM[i] : new THREE.Matrix4().makeScale(0, 0, 0);
+    if (!m) return;
+    if (culler) culler.setMatrix(im, i, m); else { im.setMatrixAt(i, m); im.instanceMatrix.needsUpdate = true; }
+  }
   /** Whole-system cull: the clearing's vegetation only renders from the mouth tunnel outwards. */
   // Inside the tunnel (> 4 m in) it also needs the mouth itself in the camera frustum, so looking
   // back into Lanternmouth doesn't draw the clearing behind the rock.
