@@ -99,7 +99,7 @@ export const CONFIG = {
     rain:  { hemi: 0.80, sky: 0x33466b, ground: 0x1e2838, moon: 0.45, fog: 0x34405a },
     easeSec: 4,
   },
-  build: { grid: 2, wallHeight: 2.1, reach: 2.2 }, // piece costs live in src/build/pieces.js
+  build: { grid: 2, wallHeight: 2.1, reach: 2.2, cluster: 12, smallCull: 25, farCull: 46 }, // M2B: idle batch split into cluster×cluster m cells (frustum culled); small decor hidden past smallCull, everything past farCull (fog) // piece costs live in src/build/pieces.js
   playerName: 'Cam',
   companion: {
     name: 'Wren', // persona + lines come from /story via src/companion/story-data.js (npm run sync-story)
@@ -217,6 +217,33 @@ export const CONFIG = {
       grass2: 'assets/models/surface/grass_tuft_2.glb',
       grass3: 'assets/models/surface/grass_tuft_3.glb',
       stewPot: 'assets/models/props/stew-pot.glb',
+      // M2 chunk B: craftables (art/assets/craft, build/fence-log, decor; metres, origin at base, +Z front)
+      tablePiece: 'assets/models/craft/table.glb',
+      craftBench: 'assets/models/craft/crafting_bench.glb',
+      shelvesPiece: 'assets/models/craft/wooden_shelves.glb',
+      bookshelfPiece: 'assets/models/craft/bookshelf.glb',
+      armchairPiece: 'assets/models/craft/armchair.glb',
+      paintingPiece: 'assets/models/craft/painting.glb',
+      shuttersPiece: 'assets/models/craft/window_shutters.glb',
+      stonePath: 'assets/models/craft/stone_path.glb',
+      fencePiece: 'assets/models/build/fence-log.glb',
+      fenceGate: 'assets/models/craft/fence_gate.glb',
+      dogBowl: 'assets/models/craft/dog_bowl.glb',
+      crystalLamp: 'assets/models/craft/stained_crystal_lamp.glb',
+      pottedGlowcap: 'assets/models/craft/potted_glowcap.glb',
+      emberLamp: 'assets/models/craft/ember_lamp.glb',
+      brassKettle: 'assets/models/craft/brass_kettle.glb',
+      hearthstone: 'assets/models/craft/hearthstone.glb',
+      wrenQuilt: 'assets/models/decor/wren_quilt.glb',
+      emberGarland: 'assets/models/decor/ember_garland.glb',
+      foodStew: 'assets/models/craft/stew.glb',
+      foodMushroom: 'assets/models/craft/roasted_mushroom.glb',
+      foodTea: 'assets/models/craft/berry_tea.glb',
+      foodFish: 'assets/models/craft/grilled_fish.glb',
+      foodFishStew: 'assets/models/craft/fish_stew.glb',
+      // tools (Kenney survival kit): stone = plain, ember = -upgraded
+      toolAxe: 'assets/models/props/tool-axe.glb', toolAxeEmber: 'assets/models/props/tool-axe-upgraded.glb',
+      toolPick: 'assets/models/props/tool-pickaxe.glb', toolPickEmber: 'assets/models/props/tool-pickaxe-upgraded.glb',
       // Custom Style-A props (art director): crystals, moss, torches — see src/world/dressing.js
       crystal1: 'assets/models/crystals/crystal-cluster-1.glb',
       crystal2: 'assets/models/crystals/crystal-cluster-2.glb',

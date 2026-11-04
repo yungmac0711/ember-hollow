@@ -116,6 +116,9 @@ export async function loadParts(name, opts = {}) {
     let extras = null;
     root.traverse((o) => { if (!extras && o.userData?.pointLight) extras = o.userData; });
     parts.extras = extras || {};
+    // M2 chunk B: named node origins in the same (normalised) space — pivots, use/sit/eat points, anchors
+    parts.nodes = {};
+    root.traverse((o) => { if (o.name) parts.nodes[o.name] = o.getWorldPosition(new THREE.Vector3()).applyMatrix4(norm); });
     parts.scale = k;
     parts.height = size.y * k;
     return parts;

@@ -93,13 +93,30 @@ function fallback(type) {
 // per-type transform from the Kenney file into piece space (origin at the base centre; edge
 // pieces run along local Z with their front facing local +X)
 const RY90 = new THREE.Matrix4().makeRotationY(HALF); // art walls run along X, front +Z → along Z, front +X
+const T = (x, y, z) => new THREE.Matrix4().makeTranslation(x, y, z);
+// anims: [{ node, kind, angle?, pivot? (file units; default = the node's own origin) }]
+//   kind 'hinge' (Y, angle° × open), 'lid' (X, angle° × open), 'chime' (draft sway), 'sway' (±5° lamp),
+//   'show' (scaled to 0 unless p.filled — dog bowl food)
 const PREP = {
   lantern: { exclude: ['lantern_R'] }, // the base lantern is one lamp; lantern_double (request reward) has both
-  crystal_wind_chime: { anim: 'chimes', pivot: new THREE.Vector3(0, -0.13, 0), sway: true },
+  crystal_wind_chime: { anims: [{ node: 'chimes', pivot: new THREE.Vector3(0, -0.13, 0), kind: 'chime' }] },
   wall: { raw: RY90 }, window: { raw: RY90 },
-  door: { raw: RY90, anim: 'door_hinge', pivot: new THREE.Vector3(-0.39, 0, 0), angle: -100 },
-  chest: { anim: 'lid_hinge', pivot: new THREE.Vector3(0, 0.45, -0.25), angle: -75 }, // pivots in file units
+  door: { raw: RY90, anims: [{ node: 'door_hinge', pivot: new THREE.Vector3(-0.39, 0, 0), kind: 'hinge', angle: -100 }] },
+  chest: { anims: [{ node: 'lid_hinge', pivot: new THREE.Vector3(0, 0.45, -0.25), kind: 'lid', angle: -75 }] }, // pivots in file units
+  // M2 chunk B (CRAFT_ASSETS.md)
+  fence: { raw: RY90 },
+  fence_gate: { raw: RY90, anims: [{ node: 'gate_door', kind: 'hinge', angle: -100 }] },
+  window_shutters: { anims: [{ node: 'shutter_L', kind: 'hinge', angle: -100 }, { node: 'shutter_R', kind: 'hinge', angle: 100 }] },
+  crafting_bench: { anims: [{ node: 'ember_lamp', kind: 'sway' }] },
+  dog_bowl: { anims: [{ node: 'food', kind: 'show' }] },
+  cooking_pot: { exclude: ['embers'] }, // the pot sits beside a fire; no embers of its own
+  bookshelf: { raw: T(0, 0, -0.9) }, // back against the cell's rear edge
 };
+const INTERACT = new Set(['door', 'chest', 'bedroll', 'crafting_bench', 'cooking_pot', 'fence_gate', 'window_shutters', 'dog_bowl']);
+const FENCE = new Set(['fence', 'fence_gate']);
+const OPENS = new Set(['door', 'chest', 'fence_gate', 'window_shutters']);
+const TAP_Y = { door: 1.0, bedroll: 0.15, crafting_bench: 0.9, fence_gate: 0.6, window_shutters: 0.35, dog_bowl: 0.08, cooking_pot: 0.4 };
+const ANIM_DEFAULT = { door: 'hinge', chest: 'lid', crystal_wind_chime: 'chime' };
 
 /** Load and prepare every piece's geometry (call once at init). */
 export async function loadPieceParts() {
@@ -109,22 +126,38 @@ export async function loadPieceParts() {
     if (!def.model) return;
     const parts = await loadParts(def.model, { raw: true });
     if (!parts) { out[type] = fallback(type); return; }
-    const stat = [], animParts = [];
+    const anims = prep.anims || [];
+    const inAnim = (p) => anims.findIndex((a) => p.node === a.node || p.ancestors?.includes(a.node));
+    const stat = [], animParts = anims.map(() => []);
     for (const p of parts) {
       if (prep.exclude && (prep.exclude.includes(p.node) || p.ancestors?.some((a) => prep.exclude.includes(a)))) continue;
       if (prep.raw) p.geometry.applyMatrix4(prep.raw);
-      (prep.anim && (p.node === prep.anim || p.ancestors?.includes(prep.anim)) ? animParts : stat).push(p);
+      const k = inAnim(p);
+      // nested anim nodes (vise_jaw under vise …): the innermost listed node wins
+      (k >= 0 ? animParts[k] : stat).push(p);
     }
-    const res = { static: mergeParts(stat) };
-    if (animParts.length) {
-      const a = mergeParts(animParts)[0];
-      const pivot = prep.pivot.clone(); if (prep.raw) pivot.applyMatrix4(prep.raw);
-      a.geometry.translate(-pivot.x, -pivot.y, -pivot.z);
-      res.anim = { geometry: a.geometry, material: a.material, pivot };
-    }
+    const res = { static: mergeParts(stat), anims: [], nodes: {} };
+    for (const [n, v] of Object.entries(parts.nodes || {})) res.nodes[n] = prep.raw ? v.clone().applyMatrix4(prep.raw) : v.clone();
+    anims.forEach((a, k) => {
+      if (!animParts[k].length) return;
+      const m = mergeParts(animParts[k])[0];
+      const pivot = (a.pivot || parts.nodes?.[a.node] || new THREE.Vector3()).clone(); if (prep.raw) pivot.applyMatrix4(prep.raw);
+      m.geometry.translate(-pivot.x, -pivot.y, -pivot.z);
+      res.anims.push({ geometry: m.geometry, material: m.material, pivot, kind: a.kind, angle: a.angle || 0 });
+    });
     out[type] = res;
   }));
   return out;
+}
+
+/** M1 fallbacks + loaded parts → { static, anims[] } with anim kinds filled in. */
+function normaliseSrc(type, src) {
+  if (!src.anims) src.anims = [];
+  if (src.anim && !src.anims.length) src.anims.push({ ...src.anim, kind: ANIM_DEFAULT[type] || 'lid', angle: type === 'door' ? -100 : -75 });
+  for (const a of src.anims) { if (!a.kind) a.kind = ANIM_DEFAULT[type] || 'lid'; if (!a.angle) a.angle = a.kind === 'hinge' ? -100 : -75; }
+  src.anim = src.anims[0] || null;
+  if (!src.nodes) src.nodes = {};
+  return src;
 }
 
 // ------------------------------------------------------------------ system
@@ -138,11 +171,12 @@ export class BuildSystem {
     this.blocked = null; // optional (x, z, r) => bool — set by main.js to keep pieces off trees/rocks
     this.batches = {};
     for (const type of PIECE_ORDER) {
-      const src = type === 'hearth' ? { static: [] } : (partsByType[type] || fallback(type));
+      const src = normaliseSrc(type, type === 'hearth' ? { static: [] } : (partsByType[type] || fallback(type)));
       for (const p of src.static) p.batch = batchGeometry(p);
-      const b = { src, items: [], stat: [], anim: null };
-      for (const p of src.static) { const im = new THREE.InstancedMesh(p.geometry, p.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; scene.add(im); b.stat.push(im); }
-      if (src.anim) { const im = new THREE.InstancedMesh(src.anim.geometry, src.anim.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; scene.add(im); b.anim = im; }
+      const b = { src, items: [], stat: [], anims: [], anim: null };
+      for (const p of src.static) { const im = new THREE.InstancedMesh(p.geometry, p.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; im.name = 'piece-' + type; scene.add(im); b.stat.push(im); }
+      for (const a of src.anims) { const im = new THREE.InstancedMesh(a.geometry, a.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; im.name = 'piece-anim-' + type; scene.add(im); b.anims.push(im); }
+      b.anim = b.anims[0] || null;
       this.batches[type] = b;
     }
     // shared ghost
@@ -160,10 +194,20 @@ export class BuildSystem {
       if (b.src.anim) { const g = b.src.anim.geometry; g.computeBoundingBox(); box.union(g.boundingBox.clone().translate(b.src.anim.pivot)); }
       this.surfaceTop[t] = box.isEmpty() ? 0.7 : box.max.y;
     }
-    // idle static batch (one plain + one glow mesh for every placed piece)
-    this.batchPlain = new THREE.Mesh(new THREE.BufferGeometry(), lambert(0xffffff, { vertexColors: true }));
-    this.batchGlow = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true }));
-    for (const m of [this.batchPlain, this.batchGlow]) { m.visible = false; m.matrixAutoUpdate = false; scene.add(m); }
+    // M2 chunk B: surface spots per host, [lx, ly, lz] in the host's space (table.glb top_0..3, shelf_0..2)
+    const tn = this.batches.table.src.nodes, tt = this.surfaceTop.table;
+    this.spots = {
+      table: [0, 1, 2, 3].map((k) => (tn[`top_${k}`] ? [tn[`top_${k}`].x, tn[`top_${k}`].y, tn[`top_${k}`].z] : [[-0.3, tt, -0.18], [0.3, tt, -0.18], [-0.3, tt, 0.18], [0.3, tt, 0.18]][k])),
+      chest: [[-0.2, 0, 0], [0.2, 0, 0], [0, 0, -0.12], [0, 0, 0.12]].map(([x, , z]) => [x, this.surfaceTop.chest, z]),
+      wooden_shelves: (() => { const sn = this.batches.wooden_shelves.src.nodes, out = [];
+        for (let k = 0; k < 3; k++) { const v = sn[`shelf_${k}`] || new THREE.Vector3(0, 0.275 + k * 0.45, 0.16); out.push([-0.26, v.y, v.z], [0.26, v.y, v.z]); }
+        return out; })(),
+    };
+    // idle static batch: per CONFIG.build.cluster-metre cell, one plain + one glow mesh for the big pieces
+    // and one plain + one glow mesh for small decor (frustum culled by three; small decor and far cells are
+    // distance-hidden in _cull).
+    this.cells = new Map();
+    this._plainMat = lambert(0xffffff, { vertexColors: true }); this._glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     this._dirty = false; this._idle = 0; this.batched = false;
     this._enclosed = new Set(); this._encDirty = true;
     this.onChange = null; // (piece, added) => void
@@ -176,6 +220,8 @@ export class BuildSystem {
   rotate() { if (PIECES[this.selected].slot === 'edge') this.flip = !this.flip; else this.rot = (this.rot + 1) % 4; }
   setRemove(on) { this.removeMode = on ?? !this.removeMode; this.target = null; return this.removeMode; }
   canAfford(inv, type = this.selected) { return Object.entries(PIECES[type].cost).every(([k, n]) => (inv[k] || 0) >= n); }
+  /** Pack copy (crafted at the bench) or the resource cost. */
+  canPlace(inv, type = this.selected) { return (inv[type] || 0) > 0 || this.canAfford(inv, type); }
   costText(type = this.selected) { return costText(PIECES[type].cost); }
 
   // ---------------------------------------------------------------- grid helpers
@@ -265,7 +311,7 @@ export class BuildSystem {
     }
     if (def.slot === 'roof') {
       let y = this.cellBase(i, j), support = false;
-      for (const [a, b, sd] of this._cellEdges(i, j)) { const w = this.slots.get(`edge:${a},${b},${sd}`); if (w) { support = true; y = Math.max(y, w.y); } }
+      for (const [a, b, sd] of this._cellEdges(i, j)) { const w = this.slots.get(`edge:${a},${b},${sd}`); if (w && !FENCE.has(w.type)) { support = true; y = Math.max(y, w.y); } }
       y += H;
       const key = `roof:${i},${j}`;
       const ryaw = this._roofYaw(i, j, f) + this.rot * HALF; // ⟳ still turns it in 90° steps from there
@@ -294,17 +340,41 @@ export class BuildSystem {
     if (def.slot === 'surface') {
       // nearest table/chest in front of Cam with a free spot on top
       let host = null, hd = Infinity;
+      const hx = P.x + f.x * 1.3, hz = P.z + f.z * 1.3;
       for (const q of this.pieces) {
-        if (q.type !== 'table' && q.type !== 'chest') continue;
-        const d = Math.hypot(q.x - ax, q.z - az);
+        if (!this.spots[q.type]) continue;
+        const d = Math.hypot(q.x - hx, q.z - hz) - (q.free = this.spots[q.type].some((_, n) => !this.slots.has(`surf:${q.id}:${n}`))) * 0.4;
         if (d < 1.6 && d < hd) { hd = d; host = q; }
       }
-      if (!host) return { type, key: null, i, j, x: ax, y: this.cave.floorAt(ax, az), z: az, yaw, ok: false, why: 'Aim at a table or chest' };
-      const spots = host.type === 'table' ? [[-0.25, -0.2], [0.25, -0.2], [-0.25, 0.2], [0.25, 0.2]] : [[-0.2, 0], [0.2, 0], [0, -0.12], [0, 0.12]];
-      let k = spots.findIndex((_, n) => !this.slots.has(`surf:${host.id}:${n}`));
-      if (k < 0) return { type, key: null, i, j, x: host.x, y: host.y + this.surfaceTop[host.type], z: host.z, yaw, ok: false, why: 'That top is full' };
-      const [lx, lz] = spots[k], c = Math.cos(host.yaw), sn = Math.sin(host.yaw);
-      return { type, key: `surf:${host.id}:${k}`, parent: host.id, i: host.i, j: host.j, x: host.x + lx * c + lz * sn, y: host.y + this.surfaceTop[host.type] + 0.002, z: host.z - lx * sn + lz * c, yaw: host.yaw + yaw, ok: true, why: '' };
+      if (!host) return { type, key: null, i, j, x: ax, y: this.cave.floorAt(ax, az), z: az, yaw, ok: false, why: 'Aim at a table, chest or shelf' };
+      const spots = this.spots[host.type];
+      const k = spots.findIndex((_, n) => !this.slots.has(`surf:${host.id}:${n}`));
+      if (k < 0) return { type, key: null, i, j, x: host.x, y: host.y + (spots[0][1] || 0.7), z: host.z, yaw, ok: false, why: 'That top is full' };
+      const [lx, ly, lz] = spots[k], c = Math.cos(host.yaw), sn = Math.sin(host.yaw);
+      return { type, key: `surf:${host.id}:${k}`, parent: host.id, i: host.i, j: host.j, x: host.x + lx * c + lz * sn, y: host.y + ly + 0.002, z: host.z - lx * sn + lz * c, yaw: host.yaw + yaw, ok: true, why: '' };
+    }
+    if (def.slot === 'wallmount' || def.slot === 'shutter') {
+      // the face of a placed wall (shelves, painting) / a window wall's opening (shutters) Cam is looking at
+      const want = def.slot === 'shutter' ? 'window' : 'wall';
+      const hx = P.x + f.x * 1.2, hz = P.z + f.z * 1.2;
+      let host = null, hd = Infinity;
+      for (const q of this.pieces) { if (q.type !== want) continue; const d = Math.hypot(q.x - hx, q.z - hz); if (d < 1.8 && d < hd) { hd = d; host = q; } }
+      if (!host) return { type, key: null, i, j, x: ax, y: this.cave.floorAt(ax, az), z: az, yaw, ok: false, why: want === 'window' ? 'Aim at a window wall' : 'Aim at a wall' };
+      const nx = Math.cos(host.yaw), nz = -Math.sin(host.yaw); // the wall's local +X (front)
+      const sd = (P.x - host.x) * nx + (P.z - host.z) * nz >= 0 ? 1 : -1;
+      const off = 0.13, y = host.y + (def.slot === 'shutter' ? 0.8 : type === 'painting' ? 1.15 : 0.45);
+      const key = def.slot === 'shutter' ? `shut:${host.id}:${sd > 0 ? 1 : 0}` : `wm:${host.id}:${sd > 0 ? 1 : 0}`;
+      ok = !this.slots.has(key); why = ok ? '' : 'Something hangs there already';
+      if (ok && def.slot === 'shutter' && this.slots.has(`shut:${host.id}:${sd > 0 ? 0 : 1}`)) { ok = false; why = 'This window has shutters'; }
+      return { type, key, parent: host.id, i: host.i, j: host.j, side: host.side, x: host.x + nx * sd * off, y, z: host.z + nz * sd * off, yaw: Math.atan2(nx * sd, nz * sd), ok, why };
+    }
+    if (def.slot === 'path') { // 1 m stepping-stone grid
+      const pi = Math.round(ax), pj = Math.round(az), key = `path:${pi},${pj}`;
+      const fl = this.heightAt(pi, pj), y = (Number.isFinite(fl) ? fl : this.cave.floorAt(pi, pj)) + 0.004;
+      if (this.cave.field(pi, pj) < 0.5) { ok = false; why = 'Too close to the cave wall'; }
+      if (ok && this.slots.has(key)) { ok = false; why = 'There’s a stone here already'; }
+      if (ok && this.cave.lakeAt?.(pi, pj, 0.4)) { ok = false; why = 'Not in the water'; }
+      return { type, key, i: Math.round(pi / G), j: Math.round(pj / G), x: pi, y, z: pj, yaw, ok, why };
     }
     // prop
     const y = this._cellPiece(i, j, 'cell') ? this.cellBase(i, j) : this.cave.floorAt(x, z);
@@ -328,7 +398,8 @@ export class BuildSystem {
       if (d > 1.7) continue;
       const slot = PIECES[p.type].slot;
       const s = d + (slot === 'cell' ? 0.7 : 0) + (slot === 'rug' ? 0.5 : 0) + (slot === 'roof' ? (up ? -0.8 : 1.2) : 0)
-        + (slot === 'hang' ? (up ? -0.9 : 0.6) : 0) + (slot === 'edge' ? -0.1 : 0) + (slot === 'surface' ? -0.45 : 0);
+        + (slot === 'hang' ? (up ? -0.9 : 0.6) : 0) + (slot === 'edge' ? -0.1 : 0) + (slot === 'surface' ? -0.45 : 0)
+        + (slot === 'wallmount' || slot === 'shutter' ? -0.3 : 0) + (slot === 'path' ? 0.5 : 0);
       if (s < bs) { bs = s; best = p; }
     }
     return best;
@@ -341,12 +412,12 @@ export class BuildSystem {
     const add = (g, m) => { const mesh = new THREE.Mesh(g, this.ghostMat); if (m) mesh.matrix.copy(m), mesh.matrixAutoUpdate = false; this.ghost.add(mesh); };
     if (type === 'hearth') { const g = new THREE.CylinderGeometry(0.55, 0.6, 0.25, 8); g.translate(0, 0.12, 0); add(g); }
     for (const p of b.src.static) add(p.geometry);
-    if (b.src.anim) add(b.src.anim.geometry, new THREE.Matrix4().makeTranslation(b.src.anim.pivot));
+    for (const a of b.src.anims) add(a.geometry, new THREE.Matrix4().makeTranslation(a.pivot));
     this._ghostType = type;
   }
 
   update(player, dt = 0.016) {
-    this._animate(dt);
+    this._animate(dt, player.pos);
     if (!this.active) { this.ghost.visible = false; return; }
     if (this.removeMode) {
       const p = this._removeTarget(player);
@@ -365,8 +436,8 @@ export class BuildSystem {
     this.ghost.visible = true;
     this.ghost.scale.setScalar(1);
     this.ghost.position.set(t.x, t.y + 0.01, t.z); this.ghost.rotation.set(0, t.yaw, 0);
-    if (PIECES[t.type].slot === 'surface') this.ghost.scale.setScalar(1.6); // keepsakes are tiny
-    this._affordable = this.canAfford(player.inventory);
+    if (PIECES[t.type].keepsake) this.ghost.scale.setScalar(1.6); // keepsakes are tiny
+    this._affordable = this.canPlace(player.inventory);
     this.ghostMat.color.setHex(t.ok && this._affordable ? 0x6fdc8c : 0xff6a6a);
   }
 
@@ -374,65 +445,95 @@ export class BuildSystem {
   _write(p) {
     const b = this.batches[p.type];
     for (const im of b.stat) { im.setMatrixAt(p.index, p.matrix); im.instanceMatrix.needsUpdate = true; }
-    if (b.anim) this._writeAnim(p);
+    if (b.anims.length) this._writeAnim(p);
   }
   _writeAnim(p) {
-    const b = this.batches[p.type], piv = b.src.anim.pivot;
-    _m.copy(p.matrix).multiply(_m2.makeTranslation(piv.x, piv.y, piv.z));
-    // door_hinge Y → −100°, lid_hinge X → −75° (art notes)
-    if (p.type === 'door') _m.multiply(_m2.makeRotationAxis(_yAxis, -p.open * 1.745));
-    else if (p.type === 'crystal_wind_chime') { // gentle draft sway
-      const t = this.time + p.id * 1.7;
-      _m.multiply(_m2.makeRotationAxis(_xAxis, Math.sin(t * 1.3) * 0.12)).multiply(_m2.makeRotationAxis(_zAxis, Math.sin(t * 0.9 + 1) * 0.1));
-    } else _m.multiply(_m2.makeRotationAxis(_xAxis, -p.open * 1.309));
-    b.anim.setMatrixAt(p.index, _m); b.anim.instanceMatrix.needsUpdate = true;
+    const b = this.batches[p.type];
+    b.src.anims.forEach((a, k) => {
+      const piv = a.pivot;
+      _m.copy(p.matrix).multiply(_m2.makeTranslation(piv.x, piv.y, piv.z));
+      if (a.kind === 'hinge') _m.multiply(_m2.makeRotationAxis(_yAxis, p.open * a.angle * Math.PI / 180)); // door/gate −100°, shutters ∓100°
+      else if (a.kind === 'chime') { // gentle draft sway
+        const t = this.time + p.id * 1.7;
+        _m.multiply(_m2.makeRotationAxis(_xAxis, Math.sin(t * 1.3) * 0.12)).multiply(_m2.makeRotationAxis(_zAxis, Math.sin(t * 0.9 + 1) * 0.1));
+      } else if (a.kind === 'sway') { // bench ember lamp: ±5°
+        const t = this.time + p.id * 1.3;
+        _m.multiply(_m2.makeRotationAxis(_xAxis, Math.sin(t * 1.1) * 0.087)).multiply(_m2.makeRotationAxis(_zAxis, Math.sin(t * 0.8 + 2) * 0.06));
+      } else if (a.kind === 'show') { if (!p.filled) _m.multiply(ZERO); }
+      else _m.multiply(_m2.makeRotationAxis(_xAxis, p.open * a.angle * Math.PI / 180)); // lid_hinge X −75°
+      b.anims[k].setMatrixAt(p.index, _m); b.anims[k].instanceMatrix.needsUpdate = true;
+    });
   }
   _syncCount(type) {
     const b = this.batches[type];
     const n = b.items.length;
     b.stat.forEach((im, k) => { im.count = n; im.visible = n > 0 && !(this.batched && b.src.static[k].batch); }); // empty instanced meshes still cost a call
-    if (b.anim) { b.anim.count = n; b.anim.visible = n > 0; }
+    for (const im of b.anims) { im.count = n; im.visible = n > 0; }
   }
   /** Something changed: show the live instanced meshes until the build has been idle for a moment. */
   _changed() {
     this._dirty = true; this._idle = 0; this._encDirty = true;
-    if (this.batched) { this.batched = false; this.batchPlain.visible = this.batchGlow.visible = false; for (const t of PIECE_ORDER) this._syncCount(t); }
+    if (this.batched) { this.batched = false; for (const m of this.batchMeshes()) m.visible = false; for (const t of PIECE_ORDER) this._syncCount(t); }
   }
-  /** Merge every placed piece's static parts into the two batch meshes (rebuilt only when idle). */
+  /** Merge every placed piece's static parts into per-cell batch meshes (rebuilt only when idle). */
   _rebuildBatch() {
-    const plain = [], glow = [];
+    const CL = CONFIG.build.cluster || 12, groups = new Map();
     for (const p of this.pieces) {
+      const small = !!PIECES[p.type].small;
+      const key = `${Math.floor(p.x / CL)},${Math.floor(p.z / CL)}|${small ? 's' : 'b'}`;
+      let gr = groups.get(key); if (!gr) groups.set(key, gr = { small, plain: [], glow: [] });
       for (const part of this.batches[p.type].src.static) {
         if (!part.batch) continue;
         const g = part.batch.geometry.clone().applyMatrix4(p.matrix);
-        (part.batch.glow ? glow : plain).push(g);
+        (part.batch.glow ? gr.glow : gr.plain).push(g);
       }
     }
-    for (const [mesh, list] of [[this.batchPlain, plain], [this.batchGlow, glow]]) {
-      mesh.geometry.dispose();
-      mesh.geometry = list.length ? mergeGeometries(list) : new THREE.BufferGeometry();
-      list.forEach((g) => g.dispose());
-      if (list.length) mesh.geometry.computeBoundingSphere();
-      mesh.visible = list.length > 0;
+    for (const c of this.cells.values()) for (const m of c.meshes) { this.scene.remove(m); m.geometry.dispose(); }
+    this.cells.clear();
+    for (const [key, gr] of groups) {
+      const meshes = [];
+      for (const [list, glow] of [[gr.plain, false], [gr.glow, true]]) {
+        if (!list.length) continue;
+        const geo = mergeGeometries(list); list.forEach((g) => g.dispose());
+        geo.computeBoundingSphere();
+        const mesh = new THREE.Mesh(geo, glow ? this._glowMat : this._plainMat);
+        mesh.name = `build-batch-${key}${glow ? '-glow' : ''}`; mesh.matrixAutoUpdate = false; mesh.visible = true;
+        this.scene.add(mesh); meshes.push(mesh);
+      }
+      if (meshes.length) this.cells.set(key, { small: gr.small, sphere: meshes[0].geometry.boundingSphere, meshes });
     }
     this._dirty = false; this.batched = true;
     for (const t of PIECE_ORDER) this._syncCount(t);
+    this._cullT = 1;
   }
+  /** Distance cull for the cell batches: small decor past smallCull, any cell past farCull (fog). */
+  _cull(pos) {
+    if (!pos || !this.batched) return;
+    const sc = (CONFIG.build.smallCull || 25) * (this.cullScale || 1), fc = (CONFIG.build.farCull || 46) * (this.cullScale || 1);
+    for (const c of this.cells.values()) {
+      const d = Math.hypot(c.sphere.center.x - pos.x, c.sphere.center.z - pos.z) - c.sphere.radius;
+      const vis = d < (c.small ? sc : fc);
+      for (const m of c.meshes) m.visible = vis;
+    }
+  }
+  batchMeshes() { return [...this.cells.values()].flatMap((c) => c.meshes); }
   /** Place the current ghost. Returns {ok, why?, piece?}. */
   place(inv) {
     const t = this.target;
     if (!t || t.remove) return { ok: false, why: 'Nothing to place' };
     if (!t.ok) return { ok: false, why: t.why || 'Can’t build there' };
-    if (!this.canAfford(inv, t.type)) return { ok: false, why: `Needs ${this.costText(t.type)}` };
+    if (!this.canPlace(inv, t.type)) return { ok: false, why: `Needs ${this.costText(t.type)}` };
     const b = this.batches[t.type];
     if (b.items.length >= CAP) return { ok: false, why: 'That’s plenty of those' };
-    for (const [k, n] of Object.entries(PIECES[t.type].cost)) inv[k] -= n;
-    const p = this._add(t);
+    // M2 chunk B: a crafted one in the pack goes first; otherwise base pieces are paid in resources
+    const fi = (inv[t.type] || 0) > 0;
+    if (fi) inv[t.type] -= 1; else for (const [k, n] of Object.entries(PIECES[t.type].cost)) inv[k] -= n;
+    const p = this._add({ ...t, fi });
     return { ok: true, piece: p };
   }
   _add(t, id = ++this._id) {
     const b = this.batches[t.type];
-    const p = { id, type: t.type, key: t.key, i: t.i, j: t.j, side: t.side, x: t.x, y: t.y, z: t.z, yaw: t.yaw, parent: t.parent ?? null, open: 0, openTarget: 0, colliders: [] };
+    const p = { id, type: t.type, key: t.key, i: t.i, j: t.j, side: t.side, x: t.x, y: t.y, z: t.z, yaw: t.yaw, parent: t.parent ?? null, open: 0, openTarget: 0, colliders: [], fi: !!t.fi || !!PIECES[t.type].craft || !!PIECES[t.type].decor || !!PIECES[t.type].keepsake, filled: !!t.filled };
     p.matrix = new THREE.Matrix4().compose(_v.set(p.x, p.y, p.z), _q.setFromAxisAngle(_yAxis, p.yaw), _one);
     p.index = b.items.length; b.items.push(p); this._syncCount(t.type);
     this._write(p);
@@ -446,7 +547,8 @@ export class BuildSystem {
   // ---------------------------------------------------------------- save / restore
   serialize() {
     return this.pieces.map((p) => ({ id: p.id, type: p.type, key: p.key, i: p.i, j: p.j, side: p.side, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(4),
-      parent: p.parent, open: p.openTarget ? 1 : 0, store: p.store ? { ...p.store } : undefined, ...(p.type === 'roof' ? { ry: 1 } : {}) }));
+      parent: p.parent, open: p.openTarget ? 1 : 0, store: p.store ? { ...p.store } : undefined, ...(p.type === 'roof' ? { ry: 1 } : {}),
+      ...(p.fi && !PIECES[p.type].craft ? { fi: 1 } : {}), ...(p.filled ? { filled: 1 } : {}) }));
   }
   /** Re-create saved pieces (no cost). Unknown types are skipped. */
   restore(list = []) {
@@ -454,7 +556,7 @@ export class BuildSystem {
       if (!PIECES[d.type] || !d.key || this.slots.has(d.key)) continue;
       const p = this._add(d, d.id);
       this._id = Math.max(this._id, d.id || 0);
-      if (d.open) { p.open = p.openTarget = 1; if (this.batches[p.type].anim) this._writeAnim(p); if (p.leaf) p.leaf.on = false; }
+      if (d.open) { p.open = p.openTarget = 1; if (this.batches[p.type].anims.length) this._writeAnim(p); if (p.leaf) p.leaf.on = false; }
       if (p.store && d.store) Object.assign(p.store, d.store);
     }
     // saves from before the lean-to fix kept the raw 0/90/180/270° yaw (ridge over the door): re-seat those
@@ -493,10 +595,34 @@ export class BuildSystem {
         break;
       }
       case 'hearth': p.fire = this.fires.build(new THREE.Vector3(p.x, p.y, p.z), 0); p.fire.hearth = true; break;
+      // M2 chunk B
+      case 'crafting_bench': p.colliders.push(C.box(p.x, p.z, 0.8, 0.4, p.yaw)); p.usePoint = this._local(p, 0, 0, 0.85); break;
+      case 'bookshelf': { const c = this._local(p, 0, 0, -0.72); p.colliders.push(C.box(c.x, c.z, 0.51, 0.18, p.yaw)); break; }
+      case 'armchair': p.colliders.push(C.circle(p.x, p.z, 0.38)); p.sitPoint = this._local(p, ...this._node(p, 'sit_point', [0, 0.46, 0.08])); break;
+      case 'cooking_pot': p.colliders.push(C.circle(p.x, p.z, 0.3)); break;
+      case 'dog_bowl': p.eatPoint = this._local(p, ...this._node(p, 'eat_point', [0, 0, 0.32])); break;
+      case 'fence': p.colliders.push(C.box(p.x, p.z, 0.08, G / 2, p.yaw)); break;
+      case 'fence_gate': {
+        const s = Math.sin(p.yaw), c = Math.cos(p.yaw);
+        for (const lz of [-0.92, 0.92]) p.colliders.push(C.box(p.x + lz * s, p.z + lz * c, 0.08, 0.08, p.yaw));
+        p.leaf = C.box(p.x, p.z, 0.06, 0.82, p.yaw); p.colliders.push(p.leaf);
+        break;
+      }
+      case 'torch': case 'stained_crystal_lamp': case 'ember_lamp': {
+        if (p.type !== 'ember_lamp') p.colliders.push(C.circle(p.x, p.z, 0.14));
+        const L = { torch: [0xff9a3c, 2.6, 6, 1.35], stained_crystal_lamp: [0xb98cff, 2, 4, 0.7], ember_lamp: [0xff9a3c, 2, 5, 0.2] }[p.type];
+        p.glowPos = new THREE.Vector3(p.x, p.y + L[3], p.z);
+        p.emitter = this.budget?.add(new Emitter({ color: L[0], intensity: L[1], distance: L[2], decay: 2, priority: p.type === 'torch' ? 1 : 0.9 }));
+        if (p.emitter) p.emitter.pos.copy(p.glowPos);
+        break;
+      }
       default: break;
     }
   }
 
+  /** Piece-local (x, y, z) → world. */
+  _local(p, x, y, z) { const c = Math.cos(p.yaw), s = Math.sin(p.yaw); return new THREE.Vector3(p.x + x * c + z * s, p.y + y, p.z - x * s + z * c); }
+  _node(p, name, def) { const v = this.batches[p.type].src.nodes[name]; return v ? [v.x, v.y, v.z] : def; }
   /** Remove the targeted piece (remove mode) with a full refund. Returns {ok, why?, refund?, piece?, contents?}. */
   remove(inv, piece = this.target?.remove, force = false) {
     if (!piece) return { ok: false, why: 'Aim at a piece to remove' };
@@ -511,10 +637,11 @@ export class BuildSystem {
         if (!others.length) return { ok: false, why: 'That wall is holding up a roof' };
       }
     }
-    const refund = { ...PIECES[piece.type].cost };
+    const own = piece.fi ? { [piece.type]: 1 } : PIECES[piece.type].cost; // crafted → back to the pack
+    const refund = { ...own };
     // keepsakes on a table/chest top come back with it
     for (const q of this.pieces.filter((q) => q.parent === piece.id)) { const r = this.remove(inv, q, true); for (const [k, n] of Object.entries(r.refund || {})) refund[k] = (refund[k] || 0) + n; }
-    for (const [k, n] of Object.entries(PIECES[piece.type].cost)) inv[k] = (inv[k] || 0) + n;
+    for (const [k, n] of Object.entries(own)) inv[k] = (inv[k] || 0) + n;
     let contents = null;
     if (piece.store) { contents = { ...piece.store }; for (const [k, n] of Object.entries(piece.store)) inv[k] = (inv[k] || 0) + n; }
     for (const c of piece.colliders) this.colliders.remove(c);
@@ -525,7 +652,7 @@ export class BuildSystem {
     const last = b.items.pop();
     if (last !== piece) { last.index = piece.index; b.items[last.index] = last; this._write(last); }
     for (const im of b.stat) im.setMatrixAt(b.items.length, ZERO);
-    if (b.anim) b.anim.setMatrixAt(b.items.length, ZERO);
+    for (const im of b.anims) im.setMatrixAt(b.items.length, ZERO);
     this._syncCount(piece.type);
     this.pieces = this.pieces.filter((p) => p !== piece); this.slots.delete(piece.key);
     if (this.target?.remove === piece) this.target = null;
@@ -539,7 +666,7 @@ export class BuildSystem {
   findInteractable(pos, forward, reach = 2.1) {
     let best = null, bs = Infinity;
     for (const p of this.pieces) {
-      if (p.type !== 'door' && p.type !== 'chest' && p.type !== 'bedroll') continue; // chunk C: bed roll → sleep
+      if (!INTERACT.has(p.type)) continue; // chunk C: bed roll → sleep
       const dx = p.x - pos.x, dz = p.z - pos.z, d = Math.hypot(dx, dz);
       if (d > reach) continue;
       const facing = d > 0.01 ? (dx * forward.x + dz * forward.z) / d : 1;
@@ -552,10 +679,10 @@ export class BuildSystem {
   pickScreen(x, y, camera, pos) {
     let best = null, bd = Infinity;
     for (const p of this.pieces) {
-      if (p.type !== 'door' && p.type !== 'chest' && p.type !== 'bedroll') continue;
+      if (!INTERACT.has(p.type)) continue;
       const d = Math.hypot(p.x - pos.x, p.z - pos.z);
       if (d > 3) continue;
-      _v.set(p.x, p.y + (p.type === 'door' ? 1.0 : p.type === 'bedroll' ? 0.15 : 0.35), p.z).project(camera);
+      _v.set(p.x, p.y + (TAP_Y[p.type] ?? 0.35), p.z).project(camera);
       if (_v.z > 1) continue;
       const e = Math.hypot((_v.x + 1) / 2 * window.innerWidth - x, (1 - _v.y) / 2 * window.innerHeight - y);
       if (e < 130 / Math.max(1, d) && e < bd) { bd = e; best = p; }
@@ -565,14 +692,17 @@ export class BuildSystem {
   toggleDoor(p) { p.openTarget = p.openTarget ? 0 : 1; return !!p.openTarget; }
   setChestOpen(p, on) { p.openTarget = on ? 1 : 0; }
 
-  _animate(dt) {
+  _animate(dt, pos) {
     this.time += dt;
     if (this._dirty && (this._idle += dt) > 0.6) this._rebuildBatch();
-    const chime = this.batches.crystal_wind_chime;
-    if (chime?.anim && chime.items.length) for (const p of chime.items) this._writeAnim(p);
+    if (pos && (this._cullT -= dt) <= 0) { this._cullT = 0.25; this._cull(pos); }
+    for (const t of ['crystal_wind_chime', 'crafting_bench']) {
+      const b = this.batches[t];
+      if (b?.anims.length && b.items.length) for (const p of b.items) if (!pos || Math.hypot(p.x - pos.x, p.z - pos.z) < 20) this._writeAnim(p);
+    }
     for (const p of this.pieces) {
-      if (p.open === p.openTarget || (p.type !== 'door' && p.type !== 'chest')) continue;
-      const step = dt * (p.type === 'door' ? 2.6 : 3.2);
+      if (p.open === p.openTarget || !OPENS.has(p.type)) continue;
+      const step = dt * (p.type === 'chest' ? 3.2 : 2.6);
       p.open = p.openTarget > p.open ? Math.min(p.openTarget, p.open + step) : Math.max(p.openTarget, p.open - step);
       this._writeAnim(p);
       if (p.leaf) p.leaf.on = p.open < 0.35;
@@ -600,6 +730,7 @@ export class BuildSystem {
         if (!this._cellPiece(i, j, 'roof')) leak = true;
         for (const [a, b, sd] of this._cellEdges(i, j)) {
           const e = this.slots.get(`edge:${a},${b},${sd}`);
+          if (e && FENCE.has(e.type)) { leak = true; continue; } // a fence isn't a wall
           if (e) { if (e.type === 'door') door = true; continue; }
           const [[c1, d1], [c2, d2]] = this._edgeCells(a, b, sd);
           const [ni, nj] = c1 === i && d1 === j ? [c2, d2] : [c1, d1];
