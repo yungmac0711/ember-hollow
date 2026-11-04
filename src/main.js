@@ -1162,7 +1162,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { craftUI, craft, nearStation, chairSeat, cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { craftUI, craft, nearStation, usePiece, pieceAction, get warmth() { return warmth; }, set warmth(v) { warmth = v; }, chairSeat, cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });
