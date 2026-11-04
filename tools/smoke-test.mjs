@@ -45,7 +45,7 @@ title.started = await page.evaluate(() => document.getElementById('start').class
 title.backdropFireRemoved = await page.evaluate(() => __game.fires.fires.length === 0);
 title.pass = title.nameOk && title.taglineOk && !title.continueShown && title.started && title.backdropFireRemoved;
 await page.screenshot({ path: OUT + 'test-output/02-spawn.png' });
-const spawnPerf = await page.evaluate(() => ({ calls: __game.renderer.info.render.calls, tris: __game.renderer.info.render.triangles, activePointLights: __game.budget.activeCount }));
+const spawnPerf = await page.evaluate(() => ({ calls: __game.renderer.info.render.calls, tris: __game.renderer.info.render.triangles, activePointLights: __game.budget.activeCount, lantern: { has: __game.player.inventory.hand_lantern, lit: __game.lantern.lit } }));
 
 // Touch controls: drag joystick (left) and look (right) with real touch events via CDP
 const cdp = await ctx.newCDPSession(page);
@@ -481,7 +481,7 @@ const m4 = {};
   await tapSel('#pause-resume');
   await page.waitForTimeout(2300); // Show FPS readout: 1 s avg + 1% low, draw calls, tier, under the pause button
   back.fps = await page.evaluate(() => { const e = document.getElementById('fps'), r = e.getBoundingClientRect(), p = document.getElementById('btn-pause').getBoundingClientRect();
-    const out = { shown: !e.classList.contains('hidden'), text: e.textContent, stats: __game.hud.fpsStats, clearOfPause: r.top >= p.bottom - 1 };
+    const out = { shown: !e.classList.contains('hidden'), text: e.textContent, stats: __game.hud.fpsStats, clearOfPause: r.top >= p.bottom - 1 || r.right <= p.left + 1 };
     __game.settings.s.showFps = false; __game.settings._changed(); out.off = e.classList.contains('hidden') === (new URLSearchParams(location.search).get('fps') !== '1'); return out; });
   m4.settings = { open, mid, back, pass: open && mid.s.master > 0.1 && mid.s.master < 0.45 && mid.stored.master === mid.s.master && mid.stored.invertY === true && mid.inv === true
     && mid.stored.tier === 'low' && mid.reloadShown === !mid.urlLow && mid.pxCap && Math.abs(mid.cull - 0.93) < 1e-3 && mid.stored.showFps === true
@@ -560,14 +560,19 @@ const m4 = {};
     const g = __game, d = g.dayNight, cl = g.cave.clearing, wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const x = cl.x + 9, z = cl.z - 6; g.player.pos.set(x, g.cave.floorAt(x, z), z); g.wren.pos.set(x + 1, g.cave.floorAt(x + 1, z), z);
     d.tod = 960; d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; await wait(2500);
+    const CONFIG_GAIN = () => g.lantern.gain;
     const snap = () => ({ hemi: +g.hemi.intensity.toFixed(3), ground: g.hemi.groundColor.getHexString(), fog: g.scene.fog.color.getHexString(), fireK: +g.ambientLight.k.toFixed(2), b: +d.b.toFixed(2), lantern: +g.wren.emitter.intensity.toFixed(2), dist: +g.wren.emitter.distance.toFixed(2) });
     const clear = snap(); d.forceRain = true; d.weather = 'rain'; d.rainK = 1; await wait(4800); const rain = snap();
+    // M2: Cam's hand lantern carries the night numbers while lit (Wren's merges into it); stowed, hers comes back
+    const cl0 = g.lantern.on; rain.cam = { lit: g.lantern.lit, i: +g.lantern.emitter.intensity.toFixed(2), dist: +g.lantern.emitter.distance.toFixed(2), gain: CONFIG_GAIN() };
+    g.lantern.on = false; await wait(1800); rain.wrenOwn = +g.wren.emitter.intensity.toFixed(2); rain.wrenDist = +g.wren.emitter.distance.toFixed(2); g.lantern.on = cl0; await wait(300);
     d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; d.tod = 120;
     return { clear, rain };
   });
   { const N = m4.night, near = (a, b) => Math.abs(a - b) < 0.03;
     N.pass = N.clear.b > 0.95 && N.clear.fireK > 0.99 && near(N.clear.hemi, 0.70) && N.clear.ground === '1a2230' && N.clear.fog === '2e3a52'
-      && near(N.rain.hemi, 0.80) && N.rain.ground === '1e2838' && N.rain.fog === '34405a' && N.rain.lantern > 4.0 && N.rain.dist > 8.8; }
+      && near(N.rain.hemi, 0.80) && N.rain.ground === '1e2838' && N.rain.fog === '34405a' && N.rain.lantern < 0.1
+      && N.rain.cam.lit && N.rain.cam.i > 4.0 * N.rain.cam.gain && N.rain.cam.dist > 8.8 && N.rain.wrenOwn > 4.0 && N.rain.wrenDist > 8.8; }
   // Art final check: the 30° lean-to roof sits ridge-on-the-back-wall; a 2-cell cabin still covers for the rain
   // mask / shelter audio and the last piece placed through the real Use path fires shelter_complete
   m4.cabin = await page.evaluate(async () => {
@@ -618,6 +623,71 @@ const m4 = {};
   m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.night.pass && m4.cabin.pass && m4.chain.pass;
 }
 
+// ---------------------------------------------------------------- M2 chunk A: HUD overhaul, hand lantern, Wren follow
+const m2a = {};
+{
+  const tap = async (sel) => { const pt = await page.evaluate((sel) => { const e = document.querySelector(sel); if (!e || e.offsetParent === null) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+    if (!pt) return false; await touch('touchStart', [{ x: pt.x, y: pt.y, id: 11 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(250); return true; };
+  await page.evaluate(() => { const g = __game, c = g.cave.chambers[0]; g.player.pos.set(c.x, g.cave.floorAt(c.x, c.z), c.z); g.lantern.on = true; });
+  // hotbar: low and slim (safe-area bottom + 6 px), 44 pt slots, 32 pt icons, 18 pt badge; idles at 0.45
+  m2a.hotbar = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms)), hb = document.getElementById('hotbar'), r = hb.getBoundingClientRect();
+    const slot = hb.querySelector('.slot:not(.lantern):not(.hidden)') || hb.querySelector('.slot'), sr = slot.getBoundingClientRect();
+    const ic = slot.querySelector('.ico-sp, img'), icr = ic?.getBoundingClientRect(), badge = hb.querySelector('.slot .n'), br = badge?.getBoundingClientRect();
+    const out = { gap: +(innerHeight - r.bottom).toFixed(1), h: +r.height.toFixed(1), slot: +sr.width.toFixed(1), icon: icr ? +icr.width.toFixed(1) : 0, badge: br ? +br.height.toFixed(1) : 0,
+      lantern: !!document.getElementById('slot-lantern'), cd: !!hb.querySelector('.cd') };
+    await wait(5600); out.idle = +getComputedStyle(hb).opacity; out.idleClass = hb.classList.contains('idle');
+    return out;
+  });
+  { const H = m2a.hotbar; H.pass = H.gap >= 4 && H.gap <= 9 && Math.abs(H.slot - 44) < 1 && Math.abs(H.icon - 32) < 1.5 && Math.abs(H.badge - 18) < 1 && H.h <= 62 && H.lantern && H.cd && H.idleClass && Math.abs(H.idle - 0.45) < 0.02; }
+  // the lantern slot toggles with a real touch tap (pointer-based onTap path, not 'click')
+  const l0 = await page.evaluate(() => __game.lantern.lit);
+  await tap('#slot-lantern'); const l1 = await page.evaluate(() => ({ lit: __game.lantern.lit, op: document.getElementById('hotbar').classList.contains('idle') ? 0 : 1 })); // woke: idle class dropped (opacity eases back)
+  await tap('#slot-lantern'); const l2 = await page.evaluate(() => __game.lantern.lit);
+  m2a.toggle = { l0, l1: l1.lit, woke: l1.op > 0.9, l2, pass: l0 === true && l1.lit === false && l1.op > 0.9 && l2 === true };
+  // lantern light: emitter in the pool, priority 2.5, Wren merged into it, light budget per tier, FP prop shown
+  m2a.light = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), c = g.cave.chambers[1];
+    g.player.pos.set(c.x - 4, g.cave.floorAt(c.x - 4, c.z + 3), c.z + 3); g.player.yaw = Math.atan2(-(c.x - g.player.pos.x), -(c.z - g.player.pos.z)); g.player.pitch = -0.15; await wait(2500);
+    const em = g.lantern.emitter, slot = g.budget.slots.find((s) => s.emitter === em);
+    const pts = g.budget.slots.filter((s) => s.emitter && s.light.intensity > 0.01).length;
+    const out = { inPool: !!slot, pr: em.priority, i: +em.intensity.toFixed(2), wren: +g.wren.emitter.intensity.toFixed(2), merged: +g.wren.merged.toFixed(2), pool: g.budget.slots.length, pts, active: g.budget.activeCount, fp: g.lantern.fp.visible,
+      calls: g.renderer.info.render.calls, tris: g.renderer.info.render.triangles };
+    g.lantern.on = false; await wait(1500); out.offWren = +g.wren.emitter.intensity.toFixed(2); out.offFp = g.lantern.fp.visible; out.offCalls = g.renderer.info.render.calls; g.lantern.on = true; await wait(400);
+    return out;
+  });
+  { const L = m2a.light, low = /low=1/.test(process.env.QUERY || ''); L.pass = L.inPool && L.pr === 2.5 && L.i > 3 && L.merged > 0.95 && L.wren < 0.1 && L.pool === (low ? 1 : 2) && L.pts <= L.pool && L.fp && !L.offFp && L.offWren > 3 && L.calls <= (low ? 60 : 100) && L.tris <= (low ? 80000 : 150000); }
+  // Wren: 2.5–3.5 m beside/behind Cam; backs off when he walks at her; never inside the camera's near zone
+  m2a.wren = await page.evaluate(async () => {
+    const g = __game, p = g.player, w = g.wren, wait = (ms) => new Promise((r) => setTimeout(r, ms)), c = g.cave.chambers[1];
+    const key = (k, d) => window.dispatchEvent(new KeyboardEvent(d ? 'keydown' : 'keyup', { code: k }));
+    const dp = () => Math.hypot(w.pos.x - p.pos.x, w.pos.z - p.pos.z), cd = () => Math.hypot(w.pos.x - g.camera.position.x, w.pos.z - g.camera.position.z);
+    w.gathering = null; w.gatherT = 60; // no hand-me-a-stick detour mid-measure
+    p.pos.set(c.x, g.cave.floorAt(c.x, c.z), c.z); p.yaw = 0; w.pos.set(c.x + 2, w.pos.y, c.z + 2); await wait(4000);
+    const out = { st: w.state, rest: +dp().toFixed(2), behind: (w.pos.x - p.pos.x) * p.forward.x + (w.pos.z - p.pos.z) * p.forward.z < 0 };
+    let minCd = 99, yielded = false; const t0 = performance.now();
+    p.yaw = Math.atan2(-(w.pos.x - p.pos.x), -(w.pos.z - p.pos.z)); key('KeyW', true);
+    while (performance.now() - t0 < 2500) { await wait(50); minCd = Math.min(minCd, cd()); yielded ||= w.state === 'yield'; }
+    key('KeyW', false); await wait(3000);
+    out.minCd = +minCd.toFixed(2); out.yielded = yielded; out.after = +dp().toFixed(2); out.pushed = w.pushed || 0;
+    return out;
+  });
+  { const W = m2a.wren; W.pass = W.rest >= 2.4 && W.rest <= 3.6 && W.behind && W.yielded && W.minCd >= 1.2 && W.after >= 2.2 && W.after <= 3.8; }
+  // settings: HUD size S/M/L scales the hotbar; Hide HUD hides it (and the hint/request) with a faint pause left
+  m2a.hud = await page.evaluate(async () => {
+    const g = __game, S = g.settings, wait = (ms) => new Promise((r) => setTimeout(r, ms)), w = () => +document.querySelector('#hotbar .slot').getBoundingClientRect().width.toFixed(1);
+    const out = {}; S.s.hudScale = 'large'; S._changed(); await wait(300); out.large = w();
+    S.s.hudScale = 'small'; S._changed(); await wait(300); out.small = w(); S.s.hudScale = 'medium'; S._changed(); await wait(300); out.medium = w();
+    S.setHideHud(true); await wait(300); out.hidden = document.body.classList.contains('hud-hidden') && getComputedStyle(document.getElementById('hotbar')).visibility === 'hidden';
+    out.pauseLeft = getComputedStyle(document.getElementById('btn-pause')).visibility !== 'hidden'; S.setHideHud(false); await wait(300); out.back = !document.body.classList.contains('hud-hidden');
+    out.warmthHidden = !document.getElementById('warmth').classList.contains('cold') ? getComputedStyle(document.getElementById('warmth')).display === 'none' : true;
+    return out;
+  });
+  { const U = m2a.hud; U.pass = U.large > U.medium + 4 && U.small < U.medium - 4 && Math.abs(U.medium - 44) < 1 && U.hidden && U.pauseLeft && U.back && U.warmthHidden; }
+  m2a.start = spawnPerf.lantern;
+  m2a.pass = m2a.hotbar.pass && m2a.toggle.pass && m2a.light.pass && m2a.wren.pass && m2a.hud.pass && m2a.start?.has === 1 && m2a.start?.lit;
+}
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
@@ -650,6 +720,8 @@ await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
 const saved = await page.evaluate(() => {
   const g = __game; g.player.inventory.mushroom = 7; g.saveNow('test');
   const d = JSON.parse(localStorage.getItem('ember_hollow.save'));
+  // M2: make it an M1-era save (no hand lantern, no lanternOn) to check the migration on Continue
+  const old = JSON.parse(JSON.stringify(d)); delete old.inventory.hand_lantern; delete old.lanternOn; localStorage.setItem('ember_hollow.save', JSON.stringify(old));
   return { tod: d.world?.tod, warmth: d.warmth, harvest: (d.harvest || []).length, v: d.v, pieces: d.pieces.length, inv: d.inventory, notes: d.notes, done: d.requests.done, pos: d.player, chest: d.pieces.filter((p) => p.store).length };
 });
 await page.reload({ waitUntil: 'load' });
@@ -662,13 +734,13 @@ if (reload.continueShown) {
 Object.assign(reload, await page.evaluate((s) => {
   const g = __game;
   return { started: document.getElementById('start').classList.contains('hidden'), pieces: g.build.pieces.length, mushroom: g.player.inventory.mushroom,
-    notesRead: g.lore.read.size, requestsDone: g.requests.done.size, tod: g.dayNight.tod, warmth: g.warmth, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2) };
+    notesRead: g.lore.read.size, requestsDone: g.requests.done.size, tod: g.dayNight.tod, warmth: g.warmth, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2), handLantern: g.player.inventory.hand_lantern, lanternLit: g.lantern.lit };
 }, saved));
-reload.pass = reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5 && Math.abs(reload.tod - saved.tod) < 5 && Math.abs(reload.warmth - saved.warmth) < 3;
+reload.pass = reload.handLantern === 1 && reload.lanternLit && reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5 && Math.abs(reload.tod - saved.tod) < 5 && Math.abs(reload.warmth - saved.warmth) < 3;
 await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
 
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ title, m2, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, m2a, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !reload.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !m2a.pass || !reload.pass ? 1 : 0);
