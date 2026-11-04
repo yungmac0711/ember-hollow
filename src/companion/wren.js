@@ -149,7 +149,7 @@ export class Wren {
       // Chunk D: sit beside Cam at the Glowmere (rock or lakeside bench)
       this.gathering = null;
       const sp = this.seat.pos, d = Math.hypot(sp.x - this.pos.x, sp.z - this.pos.z);
-      if (d > 0.3 && this.state !== 'seat') { moveSpeed = Math.min(2.5, 0.7 + d); face = sp; this.state = 'toSeat'; }
+      if (d > 0.3 && this.state !== 'seat') { moveSpeed = Math.min(3.2, 0.9 + d); face = sp; this.state = 'toSeat'; } // she waits ~3 m back now: hurry to the seat
       else { this.state = 'seat'; this.pos.x = sp.x; this.pos.z = sp.z; face = { x: sp.x + Math.sin(this.seat.heading), z: sp.z + Math.cos(this.seat.heading) }; }
     } else if (this.gathering) {
       const it = this.gathering;
