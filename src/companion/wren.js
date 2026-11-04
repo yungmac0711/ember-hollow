@@ -123,7 +123,13 @@ export class Wren {
       const it = env.items.nearest(this.pos, 3, pp, 6);
       if (it) { this.gathering = it; this._gatherTime = 0; }
     }
-    if (this.gathering) {
+    if (this.seat) {
+      // Chunk D: sit beside Cam at the Glowmere (rock or lakeside bench)
+      this.gathering = null;
+      const sp = this.seat.pos, d = Math.hypot(sp.x - this.pos.x, sp.z - this.pos.z);
+      if (d > 0.3 && this.state !== 'seat') { moveSpeed = Math.min(2.5, 0.7 + d); face = sp; this.state = 'toSeat'; }
+      else { this.state = 'seat'; this.pos.x = sp.x; this.pos.z = sp.z; face = { x: sp.x + Math.sin(this.seat.heading), z: sp.z + Math.cos(this.seat.heading) }; }
+    } else if (this.gathering) {
       const it = this.gathering;
       this._gatherTime += dt;
       const d = Math.hypot(it.pos.x - this.pos.x, it.pos.z - this.pos.z);
@@ -161,17 +167,19 @@ export class Wren {
       this.pos.z += Math.cos(this.heading) * this.speed * dt;
       const ox = this.pos.x, oz = this.pos.z;
       this.cave.resolve(this.pos, 0.6);
-      this.colliders?.resolve(this.pos, 0.35);
+      if (!this.seat || Math.hypot(this.seat.pos.x - this.pos.x, this.seat.pos.z - this.pos.z) > 1.2) this.colliders?.resolve(this.pos, 0.35);
       // stuck behind a wall for a while (target unreachable) → step out beside Cam
       const moved = Math.hypot(this.pos.x - ox, this.pos.z - oz) / Math.max(dt, 1e-4);
       this._stuckT = moveSpeed > 1 && moved < this.speed * 0.25 ? (this._stuckT || 0) + dt : 0;
-      if (this._stuckT > 2.5) {
+      if (this._stuckT > 2.5 && this.seat) { this._stuckT = 0; this.pos.set(this.seat.pos.x, this.pos.y, this.seat.pos.z); }
+      else if (this._stuckT > 2.5) {
         this._stuckT = 0; this.gathering = null;
         const back = player.forward.clone().multiplyScalar(-1.4).add(pp);
         this.cave.resolve(back, 0.6); this.colliders?.resolve(back, 0.35); this.pos.copy(back);
       }
     }
     this.pos.y = Math.max(this.cave.floorAt(this.pos.x, this.pos.z), this.floorAt ? this.floorAt(this.pos.x, this.pos.z) : -Infinity);
+    if (this.state === 'seat') this.pos.y = this.seat.pos.y - 0.05; // hips settle onto the seat top
     this.root.position.copy(this.pos);
     this.root.rotation.y = this.heading;
 
@@ -183,7 +191,7 @@ export class Wren {
       this.anim.update(dt, {
         speed: this.speed,
         turnRate: dt > 0 ? turn / dt : 0,
-        sit: this.state === 'fire' && this.speed < 0.4,
+        sit: (this.state === 'fire' || this.state === 'seat') && this.speed < 0.4,
         look: (this.state === 'idle' || talking) ? look : 0,
         talking,
       });
@@ -198,7 +206,7 @@ export class Wren {
     this.emitter.pos.copy(this._lampOffset).applyMatrix4(this.lampNode.matrixWorld);
     this.emitter.intensity = CONFIG.companion.lantern.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
 
-    this.status = this.state === 'fire' ? 'sitting by the fire, warming her hands' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
+    this.status = this.state === 'seat' ? 'sitting beside Cam by the water' : this.state === 'fire' ? 'sitting by the fire, warming her hands' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
     if (this.hoodUp) this.status += ', hood up against the cold';
   }
 }

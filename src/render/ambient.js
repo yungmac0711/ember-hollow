@@ -16,7 +16,7 @@ export class AmbientController {
       sky: [new THREE.Color(h.sky), new THREE.Color(h.skyFar)],
       ground: [new THREE.Color(h.ground), new THREE.Color(h.groundFar)],
       fog: [new THREE.Color(h.fogNear), new THREE.Color(h.fogFar)],
-      tints: h.tints.map((t) => ({ ch: cave.chambers[t.chamber], sky: new THREE.Color(t.sky), fog: new THREE.Color(t.fog) })),
+      tints: h.tints.map((t) => ({ ch: cave.chambers[t.chamber], sky: new THREE.Color(t.sky), fog: new THREE.Color(t.fog), fogW: t.fogW, density: t.density })),
     };
     this._sky = new THREE.Color(); this._ground = new THREE.Color(); this._fog = new THREE.Color();
     this.k = 1;
@@ -40,11 +40,13 @@ export class AmbientController {
     this._sky.lerpColors(sky[0], sky[1], k);
     this._ground.lerpColors(ground[0], ground[1], k);
     this._fog.lerpColors(fog[0], fog[1], k);
+    this.zone = null; // {w, density}: a tint that also sets its own fog density (the Glowmere)
     for (const t of tints) {
       const z = 1 - ss(Math.hypot(playerPos.x - t.ch.x, playerPos.z - t.ch.z), t.ch.r, t.ch.r + 3);
       if (z <= 0) continue;
       this._sky.lerp(t.sky, h.tintSky * z);
-      this._fog.lerp(t.fog, h.tintFog * z);
+      this._fog.lerp(t.fog, (t.fogW ?? h.tintFog) * z);
+      if (t.density) this.zone = { w: z, density: t.density };
     }
     const a = 1 - Math.exp(-h.smoothing * dt);
     const target = THREE.MathUtils.lerp(h.intensity, h.intensityFar, k);

@@ -1,5 +1,10 @@
 // Central tuning + feature config. Everything gameplay-tweakable lives here.
 const params = new URLSearchParams(location.search);
+// Chunk D: graphics tier from Settings (auto/low/high), read once at load; ?low=1 always wins (tests).
+export const SETTINGS_KEY = 'ember_hollow.settings';
+const tierPref = (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').tier || 'auto'; } catch { return 'auto'; } })();
+const autoLow = () => (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory || 8) <= 2;
+export const TIER = { pref: tierPref, low: params.get('low') === '1' || tierPref === 'low' || (tierPref === 'auto' && autoLow()) };
 
 export const CONFIG = {
   debug: {
@@ -7,12 +12,12 @@ export const CONFIG = {
     seed: Number(params.get('seed') || 1337), // ?seed=42 for a different cave layout wobble
     noSW: params.get('nosw') === '1',        // ?nosw=1 skips the service worker (dev)
     autostart: params.get('autostart') === '1',
-    low: params.get('low') === '1',          // ?low=1 forces the low-tier budget (1 dynamic point light)
+    low: TIER.low,                           // ?low=1 (or Settings → Graphics: Low) = low-tier budget (1 dynamic point light)
   },
   // Lighting follows art/STYLE_GUIDE.md §8 "Approved M0 lighting" (signed off Nov 3, 2026), which
   // overrides §3 where they differ. Fog values follow §3.
   render: {
-    maxPixelRatio: 1.5,
+    maxPixelRatio: TIER.low ? 1.25 : 1.5, // chunk D: the low tier also renders a little softer
     fov: 70,
     background: 0x0e1117,
     fogColor: 0x3a4656,
@@ -30,12 +35,14 @@ export const CONFIG = {
       tints: [
         { chamber: 1, sky: 0x5a4a8a, fog: 0x3a3450 }, // Flintseam Ridge (crystals)
         { chamber: 4, sky: 0x3a6a7a, fog: 0x30454f }, // the Hushing Pools
+        // Chunk D: the Glowmere's teal (user: "choose a teal tint"); fog/density from glowmere.json
+        { chamber: 6, sky: 0x2f8c86, fog: 0x1c3a48, fogW: 0.85, density: 0.05 },
       ],
       tintSky: 0.4, tintFog: 0.3,
     },
     // Dynamic point-light budget (§6: 1 campfire + 1 lantern + hemisphere). Campfire, Wren's lantern
     // and torches are *emitters* competing for this many real PointLights; the rest stay emissive.
-    maxPointLights: params.get('low') === '1' ? 1 : 2,
+    maxPointLights: TIER.low ? 1 : 2,
     // §8 backlight fix for Wren + Biscuit: emissive lift + optional fresnel rim. No extra lights.
     characterLift: { emissive: 0x16202c, emissiveIntensity: 1.0, rim: { color: 0x7fa3c8, power: 2.5, strength: 0.35 } },
   },
@@ -128,6 +135,12 @@ export const CONFIG = {
       bedrollPiece: 'assets/models/props/bedroll.glb',
       // Chunk B: request rewards, decorations, keepsakes (art/assets/build, decor, keepsakes) and lore props
       benchPiece: 'assets/models/build/lakeside_bench.glb',
+      // Chunk D: the Glowmere (art/assets/glowmere, metres, origin at base)
+      gmWater: 'assets/models/glowmere/water_plane_tile.glb',
+      gmRock1: 'assets/models/glowmere/shore_rock_1.glb', gmRock2: 'assets/models/glowmere/shore_rock_2.glb',
+      gmCap1: 'assets/models/glowmere/glowcap_cluster_1.glb', gmCap2: 'assets/models/glowmere/glowcap_cluster_2.glb', gmCap3: 'assets/models/glowmere/glowcap_cluster_3.glb',
+      gmReeds: 'assets/models/glowmere/glow_reeds.glb',
+      gmLily1: 'assets/models/glowmere/lilypad_1.glb', gmLily2: 'assets/models/glowmere/lilypad_2.glb',
       herbBundle: 'assets/models/decor/herb_bundle.glb',
       wovenRug: 'assets/models/decor/woven_rug.glb',
       biscuitBed: 'assets/models/decor/biscuit_bed.glb',
@@ -143,6 +156,7 @@ export const CONFIG = {
       loreJournal: 'assets/models/lore/journal_page.glb',
       loreSlate: 'assets/models/lore/note_slate.glb',
       loreHook: 'assets/models/lore/waylamp_hook.glb',
+      loreJar: 'assets/models/lore/note_jar.glb', // chunk D: the Glowmere's message in a jar
       // M1 gathering
       rockB: 'assets/models/cave-rock/rock-b.glb',
       mushroomRed: 'assets/models/nature/mushroom_red.glb',

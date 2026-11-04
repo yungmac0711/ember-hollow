@@ -184,7 +184,7 @@ export class GameAudio {
   }
 
   /** One footstep on 'stone' | 'grass' | 'wood'. */
-  step(surface) { if (this._one(pick(STEPS[surface] || STEPS.stone))) { this.stats.steps++; this.lastStep = surface; } }
+  step(surface) { if (this._one(pick(STEPS[surface] || STEPS.stone))) { this.stats.steps++; this.lastStep = surface; (this.stats.surfaces ||= {})[surface] = (this.stats.surfaces[surface] || 0) + 1; } }
   /** Biscuit's bark bubble. */
   bark() { if (this._one(pick(YIPS))) this.stats.yips++; }
   /** A single fire pop (lighting a fire, adding wood). */

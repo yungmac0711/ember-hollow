@@ -22,10 +22,45 @@ export class Player {
 
   get forward() { return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
 
+  /** Chunk D: sit on a seat {pos (seat top), yaw (facing), stand (Vector3)} — the camera eases out. */
+  sit(seat) {
+    this.seat = seat; this.sitE = this.sitE || 0; this._sitHold = 0.6; // ignore the stick briefly
+    this.vel.set(0, 0, 0); this.speed = 0;
+    this.pos.set(seat.pos.x, seat.pos.y, seat.pos.z);
+    this.yaw = seat.yaw; this.pitch = -0.2;
+  }
+  stand() {
+    if (!this.seat) return;
+    const s = this.seat; this.seat = null;
+    this.pos.copy(s.stand); this.pos.y = this.cave.floorAt(s.stand.x, s.stand.z);
+    this.onStand?.(s);
+  }
+
   update(dt, input) {
     const look = input.consumeLook();
     this.yaw -= look.x;
-    this.pitch = Math.max(-P.pitchLimit, Math.min(P.pitchLimit, this.pitch - look.y));
+    this.pitch = Math.max(-P.pitchLimit, Math.min(P.pitchLimit, this.pitch - look.y * (this.invertY ? -1 : 1)));
+    const fovWant = (this.baseFov || 70) + 6 * (this.sitE || 0);
+    if (Math.abs(this.camera.fov - fovWant) > 0.01) { this.camera.fov = fovWant; this.camera.updateProjectionMatrix(); }
+    if (this.seat) {
+      // seated: no walking; push the stick (or jump) to stand up. Camera eases back + up a little
+      // so Cam's view takes in Wren beside them and the water (≈1.2 s ease).
+      this._sitHold -= dt;
+      if (this._sitHold <= 0 && (Math.hypot(input.move.x, input.move.y) > 0.5 || input.jumpHeld)) { this.stand(); return this.update(0, input); }
+      this.sitE = Math.min(1, (this.sitE || 0) + dt / 1.2);
+      const e = this.sitE * this.sitE * (3 - 2 * this.sitE);
+      const fx = -Math.sin(this.seat.yaw), fz = -Math.cos(this.seat.yaw);
+      this.speed = 0; this.stillTime += dt; this.onGround = true;
+      // ease back, up and a little away from Wren, turning slightly toward her, so both fit in frame
+      const w = this.seat.wren?.pos; let sx = 0, sz = 0;
+      if (w) { sx = this.pos.x - w.x; sz = this.pos.z - w.z; const l = Math.hypot(sx, sz) || 1; sx /= l; sz /= l; }
+      this.camera.position.set(this.pos.x - fx * 1.45 * e + sx * 0.4 * e, this.pos.y + 0.78 + 0.5 * e, this.pos.z - fz * 1.45 * e + sz * 0.4 * e);
+      this.cave.resolve(this.camera.position, 0.4);
+      const yawLook = Math.atan2(-(fx - sx * 0.22 * e), -(fz - sz * 0.22 * e)) + (this.yaw - this.seat.yaw);
+      this.camera.rotation.set(this.pitch, yawLook, 0);
+      return;
+    }
+    this.sitE = Math.max(0, (this.sitE || 0) - dt * 3);
 
     // Horizontal movement relative to yaw
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);

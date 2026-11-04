@@ -5,8 +5,8 @@
 // merged into one vertex-coloured mesh (+1 unlit mesh for the emissive glowcaps: 2 draw calls total). Cam reads a note with Use when near it or
 // by tapping it; the parchment reader (ui/parchment_reader.png, 9-slice) shows it, it's marked read
 // (saved) and added to the journal in the pack. Chunk C places the clearing note as a carving on a
-// birch at the clearing edge (spot from src/world/surface.js). Glowmere isn't built yet, so its note
-// is still not placed (known issue, M1_PLAN decisions).
+// birch at the clearing edge (spot from src/world/surface.js). Chunk D places the Glowmere's note in a
+// stoppered jar lying on the lakeshore (spot from src/world/glowmere.js), so every note is now placed.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { STORY } from '../data/story.js';
@@ -24,11 +24,12 @@ export class LoreNotes {
     this.notes = []; // {id, title, text, kind, pos, read}
     this.read = new Set();
     const rng = mulberry32((seed ^ 0x10fe) >>> 0);
-    const geos = [], glowGeos = [];
+    const geos = [], glowGeos = [], jarGeos = [], jarGlow = [];
+    let into = [geos, glowGeos]; // the Glowmere jar gets its own pair so it's hidden with the grotto
     const add = (parts, m) => {
       for (const p of parts || []) {
         const b = batchGeometry(p); if (!b) continue;
-        b.geometry.applyMatrix4(m); (b.glow ? glowGeos : geos).push(b.geometry);
+        b.geometry.applyMatrix4(m); into[b.glow ? 1 : 0].push(b.geometry);
       }
     };
     const mat = (x, y, z, yaw = 0, pitch = 0, s = 1) => new THREE.Matrix4().compose(_v.set(x, y, z),
@@ -110,6 +111,15 @@ export class LoreNotes {
         for (let k = 0; k < 4; k++) add([prim(new THREE.BoxGeometry(0.13 - (k % 2) * 0.04, 0.012, 0.012), 0x5a4632)], mat(x + fx * 0.012, y + 0.1 - k * 0.065, z + fz * 0.012, b.yaw));
         return { x: x + fx * 0.35, z: z + fz * 0.35, y, yaw: b.yaw };
       },
+      // "In a stoppered jar on the lakeshore." — a sea-glass jar on its side, cork in, rolled note inside
+      note_glowmere_wish: () => {
+        const j = props.glowmereJar; if (!j) return null;
+        into = [jarGeos, jarGlow];
+        add(props.jar, mat(j.x, j.y, j.z, j.yaw, 0, 1.25)); // art/assets/lore/note_jar.glb (emissive jar_glow)
+        add([prim(new THREE.DodecahedronGeometry(0.08, 0), 0x55606b)], mat(j.x + 0.18, j.y + 0.03, j.z - 0.08)); // a shore pebble beside it
+        into = [geos, glowGeos];
+        return { ...j, y: j.y + 0.25 };
+      },
     };
     for (const n of STORY.lore.notes || []) {
       const fn = place[n.id];
@@ -128,6 +138,9 @@ export class LoreNotes {
       this.glow = new THREE.Mesh(mergeGeometries(glowGeos), new THREE.MeshBasicMaterial({ vertexColors: true }));
       scene.add(this.glow);
     }
+    // the jar: named so Glowmere.update hides it with the grotto's other meshes
+    if (jarGeos.length) { const m = new THREE.Mesh(mergeGeometries(jarGeos), new THREE.MeshLambertMaterial({ vertexColors: true })); m.name = 'lore-jar'; scene.add(m); }
+    if (jarGlow.length) { const m = new THREE.Mesh(mergeGeometries(jarGlow), new THREE.MeshBasicMaterial({ vertexColors: true })); m.name = 'lore-jar-glow'; scene.add(m); }
   }
 
   /** Nearest note within reach (any), preferring ones in front. */

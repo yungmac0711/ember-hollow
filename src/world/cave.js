@@ -14,9 +14,13 @@ export const CHAMBERS = [
   // Chunk C: the surface. A grassy bowl under open sky, ringed by cliffs, reached up the mouth
   // tunnel from Lanternmouth. `surface` chambers get no ceiling and raised cliff walls (see sample()).
   { id: 'clearing',     name: 'the Clearing',       x: 13,  z: 25,  r: 12.5, elev: 1.2, surface: true, desc: 'a grassy clearing just outside the cave mouth, open sky overhead, pines and birches all round' },
+  // Chunk D: the Glowmere, an underground lake past the Hushing Pools (LORE: the still pools drain on
+  // into it). High vaulted grotto, the lake on its far side; lit only by emissive glowcaps, reeds,
+  // lily blooms, crystals and wisps. `lake` = the water disc (floor dips under it, collider keeps Cam out).
+  { id: 'glowmere',     name: 'the Glowmere',       x: -34, z: 32,  r: 9.5, elev: -1.2, lake: { x: -36.2, z: 34.2, r: 5.2 }, desc: 'a hushed underground lake glowing teal, crystals under the water and wisps drifting over it' },
 ];
 // [fromChamber, toChamber, radius]
-const TUNNELS = [[0, 1, 2.0], [0, 2, 1.9], [1, 2, 1.7], [0, 3, 1.8], [0, 4, 1.9], [3, 2, 1.6], [0, 5, 2.3]]; // [0,5] = the cave mouth
+const TUNNELS = [[0, 1, 2.0], [0, 2, 1.9], [1, 2, 1.7], [0, 3, 1.8], [0, 4, 1.9], [3, 2, 1.6], [0, 5, 2.3], [4, 6, 1.9]]; // [0,5] = the cave mouth, [4,6] = Hushing Pools → Glowmere
 // Surface blend (STYLE_GUIDE §8.2): depthIntoCave = metres past the clearing's rim (MOUTH_R from its centre).
 const MOUTH_R = 12.5;
 const CLIFF = 7.5;  // extra wall height around the clearing (cliffs instead of a ceiling)
@@ -70,6 +74,10 @@ export class Cave {
       const w = 1 / (k * k);
       wsum += w; esum += w * c.elev;
       if (c.pool && d < 4) { const s = 1 - d / 4; dip -= 0.9 * s * s * (3 - 2 * s); }
+      if (c.lake) { // lake bed ~0.6 m under the water (glowmere.json: bed y = -0.6)
+        const dl = Math.hypot(x - c.lake.x, z - c.lake.z), s = Math.min(1, Math.max(0, (c.lake.r + 0.6 - dl) / 1.8));
+        dip -= 0.8 * s * s * (3 - 2 * s);
+      }
     }
     return esum / wsum + dip + fbm(this.noiseC, x * 0.12, z * 0.12, 2) * 0.35;
   }
@@ -122,6 +130,14 @@ export class Cave {
     }
   }
 
+  /** The Glowmere lake disc this point is in (with an optional margin), or null. */
+  lakeAt(x, z, margin = 0) {
+    for (const c of this.chambers) if (c.lake && Math.hypot(x - c.lake.x, z - c.lake.z) < c.lake.r + margin) return c.lake;
+    return null;
+  }
+  /** Water surface height of a chamber's lake (just under the shore). */
+  waterY(c) { return c.elev - 0.17; }
+
   chamberAt(x, z) {
     for (const c of this.chambers) if (Math.hypot(x - c.x, z - c.z) < c.r * 0.85) return c;
     return null;
@@ -139,6 +155,7 @@ export class Cave {
         x = b.minX + rng() * (b.maxX - b.minX); z = b.minZ + rng() * (b.maxZ - b.minZ);
       }
       if (!chamber && this.depthIntoCave(x, z) < 6) continue; // generic scatter stays underground
+      if (this.lakeAt(x, z, 0.8)) continue; // nothing spawns in the Glowmere lake
       const f = this.field(x, z);
       if (f >= minF && f <= maxF) return new THREE.Vector3(x, this.floorAt(x, z), z);
     }
@@ -158,13 +175,18 @@ export class Cave {
       this.sample(b.minX + i * STEP, b.minZ + j * STEP, s);
       F[k] = s.f; FY[k] = s.floor; CY[k] = s.ceil; W[k] = s.wall; O[k] = s.open;
     }
-    const remapAndBuild = (isCeil) => {
+    // Chunk D perf: the Glowmere's cells go in their own floor/ceiling meshes, so the main cave meshes
+    // don't grow (and the grotto is frustum-culled as one piece from everywhere else).
+    const gm = CHAMBERS.find((c) => c.id === 'glowmere');
+    const inGm = (x, z) => Math.hypot(x - gm.x, z - gm.z) < gm.r + 6;
+    const remapAndBuild = (isCeil, region = 0) => {
       const pos = [], col = [], idx = [], sun = [];
       const map = new Int32Array(N).fill(-1);
       const c = new THREE.Color();
       // Palette: art/STYLE_GUIDE.md §2 (Cave Stone, Hollow Moss, Wet Stone, Deep Slate, Hearth Earth)
       const floorA = new THREE.Color(0x2b3440), moss = new THREE.Color(0x4f6b3a), wallC = new THREE.Color(0x3e4a57);
       const ceilA = new THREE.Color(0x2b3440), ceilB = new THREE.Color(0x1a2029), earth = new THREE.Color(0x5a4636);
+      const lakeBed = new THREE.Color(0x0e2a34);
       const grassA = new THREE.Color(0x4f6b3a), grassB = new THREE.Color(0x67803f), cliffC = new THREE.Color(0x5b5f63);
       const vert = (k, i, j) => {
         if (map[k] >= 0) return map[k];
@@ -189,6 +211,8 @@ export class Cave {
           if (m > 0.15) c.lerp(moss, Math.min(1, (m - 0.15) * 2.5) * 0.8);
           const hd = Math.hypot(x - CHAMBERS[0].x, z - CHAMBERS[0].z);
           if (hd < 5) c.lerp(earth, (1 - hd / 5) * 0.7); // firelit dirt around the hearth
+          const lk = this.lakeAt(x, z, 0.4);
+          if (lk) c.lerp(lakeBed, Math.min(1, (lk.r + 0.4 - Math.hypot(x - lk.x, z - lk.z)) / 1.2)); // glowmere.json lake bed #0E2A34
           c.lerp(wallC, W[k]);
           c.multiplyScalar(0.85 + v * 0.3);
         }
@@ -197,6 +221,7 @@ export class Cave {
       };
       for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
         const ka = j * nx + i, kb = ka + 1, kc = ka + nx, kd = kc + 1;
+        if (inGm(b.minX + (i + 0.5) * STEP, b.minZ + (j + 0.5) * STEP) !== (region === 1)) continue;
         const op = Math.min(O[ka], O[kb], O[kc], O[kd]);
         if (isCeil && op > 0.97) continue; // open sky over the clearing
         if (Math.max(F[ka], F[kb], F[kc], F[kd]) < (op > 0.5 && !isCeil ? -3.2 : -0.9)) continue; // cliff tops get a grassy rim
@@ -227,8 +252,11 @@ export class Cave {
     const ceil = new THREE.Mesh(remapAndBuild(true), mat);
     floor.name = 'cave-floor'; ceil.name = 'cave-ceiling';
     floor.matrixAutoUpdate = ceil.matrixAutoUpdate = false;
+    const gFloor = new THREE.Mesh(remapAndBuild(false, 1), mat), gCeil = new THREE.Mesh(remapAndBuild(true, 1), mat);
+    gFloor.name = 'cave-floor-glowmere'; gCeil.name = 'cave-ceiling-glowmere';
+    gFloor.matrixAutoUpdate = gCeil.matrixAutoUpdate = false;
     const group = new THREE.Group();
-    group.add(floor, ceil);
+    group.add(floor, ceil, gFloor, gCeil);
     return group;
   }
 }

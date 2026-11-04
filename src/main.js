@@ -38,6 +38,8 @@ import { DayNight, timeWord, canSleepAt, T as DN, CYCLE as DAY_CYCLE } from './r
 import { Cooking } from './fire/cooking.js';
 import { Surface, loadSurfaceParts, treeVariants } from './world/surface.js';
 import { bestTier, fill } from './companion/when.js';
+import { Glowmere, Fireflies } from './world/glowmere.js';
+import { SettingsPanel } from './ui/settings.js';
 
 const FC = CONFIG.fire, R = CONFIG.render;
 const startMsg = document.getElementById('start-msg');
@@ -131,8 +133,12 @@ async function init() {
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
   const [surfParts, stewPotP] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw)]); // Chunk C
-  const [loreNoteP, loreJournalP, loreSlateP, loreHookP] = await Promise.all([
-    loadParts('loreNote', raw), loadParts('loreJournal', raw), loadParts('loreSlate', raw), loadParts('loreHook', raw)]);
+  const gmP = {}; // Chunk D: the Glowmere set
+  await Promise.all(['water', 'rock1', 'rock2', 'cap1', 'cap2', 'cap3', 'reeds', 'lily1', 'lily2'].map(async (k) => {
+    gmP[k] = await loadParts('gm' + k[0].toUpperCase() + k.slice(1), raw);
+  }));
+  const [loreNoteP, loreJournalP, loreSlateP, loreHookP, loreJarP] = await Promise.all([
+    loadParts('loreNote', raw), loadParts('loreJournal', raw), loadParts('loreSlate', raw), loadParts('loreHook', raw), loadParts('loreJar', raw)]);
 
   const decor = buildDecor(scene, cave, seed, { boulder: decorBoulder, pillar: decorPillar, skipCrystals: crystalParts.length > 0 });
   const dressing = buildDressing(scene, cave, seed, {
@@ -145,8 +151,10 @@ async function init() {
   const surface = new Surface(scene, cave, seed, surfParts, { low: CONFIG.debug.low });
   // Chunk C perf: per-instance frustum + fog-distance culling for static instanced decor
   const instCull = new InstanceCuller();
-  instCull.addAll(decor.group, 32); instCull.addAll(dressing.group, 32);
+  instCull.addAll(decor.group, 28); instCull.addAll(dressing.group, 28); // chunk D: 32 → 28 m (fog ≥ 94% at 28 m cold; keeps a full 60-piece base under 80k tris)
   for (const m of surface.meshes) instCull.add(m, 26);
+  const glowmere = new Glowmere(scene, cave, seed, gmP, colliders);
+  const fireflies = new Fireflies(scene, seed);
   const harvest = new Harvest(scene, cave, seed, colliders, [rockA], { variants: treeVariants(surfParts), trees: surface.trees });
   const cooking = new Cooking(scene, stewPotP);
   const dayNight = new DayNight(scene, cave, budget, { low: CONFIG.debug.low });
@@ -169,7 +177,7 @@ async function init() {
   };
   player.colliders = colliders;
   harvest.canRespawn = (n) => !build.pieces.some((p) => Math.hypot(p.x - n.pos.x, p.z - n.pos.z) < 1.4);
-  build.blocked = (x, z, r) => harvest.nodes.some((n) => n.alive && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
+  build.blocked = (x, z, r) => cave.lakeAt(x, z, r * 0.6) || harvest.nodes.some((n) => n.alive && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
 
   const pModel = puppyModel.fromFile || puppyModel.parts.legs ? puppyModel : { ...buildPuppyPrimitive(), animations: [] };
   const puppy = new Puppy(scene, cave, pModel, spawn.clone().add(new THREE.Vector3(-1.2, 0, -1.5)));
@@ -179,7 +187,7 @@ async function init() {
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
-  const lore = new LoreNotes(scene, cave, seed, { note: loreNoteP, journal: loreJournalP, slate: loreSlateP, hook: loreHookP, clearingBirch: surface.clearingBirch });
+  const lore = new LoreNotes(scene, cave, seed, { note: loreNoteP, journal: loreJournalP, slate: loreSlateP, hook: loreHookP, jar: loreJarP, clearingBirch: surface.clearingBirch, glowmereJar: glowmere.jarSpot });
   const reader = new ParchmentReader(document.getElementById('reader'));
   const requests = new Requests();
   const keepsakesFound = new Set();
@@ -440,12 +448,21 @@ async function init() {
   function setPaused(on) {
     if (!running) return;
     paused = on; pauseEl.classList.toggle('hidden', !on);
+    if (!on && settings.isOpen) settings.el.classList.add('hidden');
     if (on) { input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); pauseNote.textContent = game.lastSave ? `Last saved ${new Date(game.lastSave.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''; }
     else { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches) input.requestPointerLock(); }
   }
   onTap(document.getElementById('btn-pause'), () => setPaused(!paused));
   onTap(document.getElementById('pause-resume'), () => setPaused(false));
   onTap(document.getElementById('pause-close'), () => setPaused(false));
+  // Chunk D: settings (title + pause), saved to localStorage; see src/ui/settings.js
+  player.baseFov = R.fov;
+  const settings = new SettingsPanel({
+    apply: (st) => { audio.setVolumes({ master: st.master, music: st.music, effects: st.effects }); input.sens = st.sens; player.invertY = !!st.invertY; },
+    beforeReload: () => { if (running) saveNow('settings'); },
+    onClose: () => { if (paused) pauseEl.classList.remove('hidden'); },
+  });
+  onTap(document.getElementById('pause-settings'), () => { pauseEl.classList.add('hidden'); settings.open(); });
   onTap(document.getElementById('pause-save'), () => { pauseNote.textContent = saveNow('manual') ? 'Game saved ✓' : 'Could not save (storage full or private mode)'; audio.blip(700); });
 
   // ------------------------------------------------------------ session end → memory summary
@@ -486,6 +503,7 @@ async function init() {
       if (build.removeMode) { const p = build.target?.remove; return p ? { label: `Remove ${PIECES[p.type].name.toLowerCase()}`, kind: 'remove' } : { label: 'Remove…', kind: 'remove' }; }
       return { label: `Place ${PIECES[build.selected].name.toLowerCase()}`, kind: 'build' };
     }
+    if (player.seat) return { label: 'Stand up', kind: 'stand' };
     const it = items.findTarget(player.pos, fwd);
     if (it) return { label: `Pick up ${ITEM_INFO[it.kind].label}`, kind: 'pick', it };
     const note = lore.findTarget(player.pos, fwd);
@@ -494,6 +512,8 @@ async function init() {
     const bp = build.findInteractable(player.pos, fwd);
     if (node && bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z)) node = null; // nearer one wins
     if (node) return { label: node.type === 'tree' ? 'Hold: chop' : 'Hold: break', kind: 'harvest', node };
+    const seat = findSeat();
+    if (seat && !(bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < seat.d)) return { label: seat.label, kind: 'sit', seat };
     if (bp) return bp.type === 'door' ? { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp }
       : bp.type === 'bedroll' ? { label: 'Sleep', kind: 'sleep', piece: bp } : { label: 'Open chest', kind: 'chest', piece: bp };
     // Chunk C: cooking on a lit campfire / hearth (selecting a mushroom or glowcap puts cooking first)
@@ -518,6 +538,33 @@ async function init() {
     if (dw < 2.4) return { label: 'Talk', kind: 'talk' };
     return null;
   }
+
+  // Chunk D: places to sit — the Glowmere shore rock, and any placed lakeside bench (sit_point_A/B)
+  function benchSeat(p) {
+    const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
+    const at = (lx) => new THREE.Vector3(p.x + lx * c, p.y + 0.47, p.z - lx * sn); // sit_point_A/B (±0.35, 0.47, 0)
+    const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw); // the bench faces local +Z (toward the lake)
+    const st = new THREE.Vector3(p.x - fx * 0.9, 0, p.z - fz * 0.9);
+    return { id: `bench:${p.id}`, bench: true, pos: at(-0.35), yaw: Math.atan2(-fx, -fz), wren: { pos: at(0.35), heading: p.yaw }, stand: st };
+  }
+  function findSeat() {
+    let best = null;
+    const consider = (seat, cx, cz, label) => {
+      const d = Math.hypot(cx - player.pos.x, cz - player.pos.z);
+      if (d < 1.9 && (!best || d < best.d)) best = { ...seat, d, label };
+    };
+    const gs = glowmere.seat;
+    consider(gs, (gs.pos.x + gs.wren.pos.x) / 2, (gs.pos.z + gs.wren.pos.z) / 2, 'Sit by the water');
+    for (const p of build.pieces) if (p.type === 'lakeside_bench') consider(benchSeat(p), p.x, p.z, 'Sit on the bench');
+    return best;
+  }
+  function sitDown(seat) {
+    player.sit(seat); wren.seat = seat.wren; input.reset?.();
+    const atLake = glowmere.weight(player.pos) > 0.3;
+    if (atLake) { ambient.trigger('glowmere_sit', { force: !visited.has('glowmere_sit') }); visited.add('glowmere_sit'); memory.addFact('moment', 'Cam and Wren sat together by the Glowmere', 2); }
+    hud.toast(atLake ? 'You sit by the water. Move to stand up' : 'You sit a while. Move to stand up', 2.4);
+  }
+  player.onStand = () => { wren.seat = null; };
 
   function pickIngredient() {
     const inv = player.inventory, sel = invUI.selected;
@@ -578,6 +625,8 @@ async function init() {
         if (cooking.take(a.pot)) { inv.stew = (inv.stew || 0) + 1; invUI.select('stew'); hud.toast('+1 stew 🍲 (tap it again to eat)', 2.2); audio.blip(700); }
         break;
       case 'talk': chat.show(); break;
+      case 'sit': sitDown(a.seat); break;
+      case 'stand': player.stand(); break;
       case 'harvest': break; // hold-driven, see updateHold()
       case 'door': { const open = build.toggleDoor(a.piece); audio.blip(open ? 240 : 200); break; }
       case 'chest': openChest(a.piece); break;
@@ -726,6 +775,7 @@ async function init() {
         memory.addFact('milestone', `Cam explored ${area.name}`, 2);
       }
       if (area.surface) ambient.trigger('enter_clearing', { force: !visited.has(area.id) });
+      else if (area.id === 'glowmere') ambient.trigger('enter_glowmere', { force: !visited.has(area.id) });
       else if (area !== lanternmouth) ambient.trigger('new_area');
       if (!visited.has(area.id)) { visited.add(area.id); if (area !== lanternmouth) puppy.bark('area'); }
     }
@@ -831,6 +881,8 @@ async function init() {
     }
     fogK += (target - fogK) * Math.min(1, dt * 0.35); // gentle
     scene.fog.density = THREE.MathUtils.lerp(R.fogCold, R.fogWarm, fogK);
+    const zn = ambientLight.zone; // the Glowmere keeps its own 0.05 grotto fog
+    if (zn) scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, zn.density, zn.w);
     // audio follows the same fire
     const fd = fire ? Math.hypot(fire.pos.x - player.pos.x, fire.pos.z - player.pos.z) : 99;
     const ch = build.find('crystal_wind_chime');
@@ -940,6 +992,12 @@ async function init() {
     const cp = camera.getWorldPosition(_camPos);
     dayNight.update(dt, { advance: running && !sleeping, camPos: cp, hemi, fog: scene.fog, scene, fireK: ambientLight.k, caveDensity: scene.fog.density, renderer });
     surface.update(dt, cp, camera); instCull.update(dt, camera);
+    glowmere.update(dt, player.pos, { lanternOn: wren.lightOn, sitting: !!player.seat && glowmere.weight(player.pos) > 0.3 });
+    { // fireflies: the grotto (25, cyan) or the clearing at dusk (40, warm); none in the caves
+      const gw = glowmere.weight(player.pos);
+      const dusk = timeWord(dayNight.tod) === 'dusk' && dayNight.b > 0.3;
+      fireflies.update(dt, player.pos, gw > 0.05 ? 'grotto' : dusk ? 'dusk' : null, gw > 0.05 ? gw : dayNight.b * (1 - 0.7 * dayNight.rainK));
+    }
     if (surface.visible === false) dayNight.sky.visible = false;
     for (const v of ['pine', 'round', 'birch']) if (harvest.treeMeshes[v]) harvest.treeMeshes[v].visible = surface.visible !== false; // surface trees off deep in the cave
     if (!running) cooking.update(0, cp);
@@ -950,7 +1008,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });
@@ -964,7 +1022,8 @@ async function init() {
   document.getElementById('title-tip').textContent = UI.loadingTips[Math.floor(Math.random() * UI.loadingTips.length)];
   const menuEl = document.getElementById('title-menu'), confirmEl = document.getElementById('title-confirm');
   const contBtn = document.getElementById('title-continue'), newBtn = document.getElementById('title-new'), setBtn = document.getElementById('title-settings');
-  contBtn.textContent = UI.menu.continue; newBtn.textContent = UI.menu.newGame; setBtn.textContent = `${UI.menu.settings} (soon)`;
+  contBtn.textContent = UI.menu.continue; newBtn.textContent = UI.menu.newGame; setBtn.textContent = UI.menu.settings;
+  onTap(setBtn, () => { audio.unlock(); settings.open(); });
   const fresh = consumeNewGameFlag();
   const save = fresh ? null : readSave();
   let started = false;
