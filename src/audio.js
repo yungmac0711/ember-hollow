@@ -63,6 +63,22 @@ export class GameAudio {
     }
   }
 
+  /** Biscuit's bark — audio hook (Chunk B ships the visual "woof!" only; drop a bark sample here). */
+  bark() { /* intentionally silent for now */ }
+
+  /** Soft crystal wind-chime tinkle (2–3 high sine partials, gentle decay). */
+  chime(level = 1) {
+    if (!this.unlocked || level <= 0) return;
+    const c = this.ctx, t0 = c.currentTime;
+    const notes = [1568, 1976, 2349, 2637].sort(() => Math.random() - 0.5).slice(0, 2 + (Math.random() < 0.5 ? 1 : 0));
+    notes.forEach((f, i) => {
+      const o = c.createOscillator(), g = c.createGain(), t = t0 + i * (0.12 + Math.random() * 0.1);
+      o.type = 'sine'; o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03 * level, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+      o.connect(g).connect(this.master); o.start(t); o.stop(t + 1.5);
+    });
+  }
+
   blip(freq = 660) {
     if (!this.unlocked) return;
     const c = this.ctx, o = c.createOscillator(), g = c.createGain();

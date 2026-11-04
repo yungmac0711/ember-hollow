@@ -7,22 +7,26 @@ import { CONFIG } from '../config.js';
 import { mulberry32 } from '../world/noise.js';
 import { lambert } from '../assets.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { STORY } from '../data/story.js';
 
 const CULL_DIST = 26; // whole-kind distance cull: no alive item of a kind within this → mesh hidden (saves calls)
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
+// Item ids follow story/DATA_FORMATS.md (wood, stone, flint, mushroom, glowcap, crystal_shard, stew);
+// descriptions are the writer's item_flavor.json lines. `pickup` kinds lie around the cave.
 export const ITEM_INFO = {
-  wood:  { label: 'wood',  icon: '🪵', img: 'wood' },
-  stone: { label: 'stone', icon: '🪨', img: 'stone' },
-  flint: { label: 'flint', icon: '✦', desc: 'Strikes a spark. Needed to light a campfire.' },
-  mushroom: { label: 'mushroom', icon: '🍄', desc: 'A plump cave mushroom. Good in a stew, later.' },
-  glowcap: { label: 'glowcap', icon: '🍄', img: 'glowcap', desc: 'Softly glowing cap from the Galleries.' },
-  shard: { label: 'crystal shard', icon: '💎', img: 'crystal', desc: 'A humming purple shard from Flintseam.' },
+  wood:  { label: 'wood',  icon: '🪵', img: 'wood', pickup: true },
+  stone: { label: 'stone', icon: '🪨', img: 'stone', pickup: true },
+  flint: { label: 'flint', icon: '✦', pickup: true },
+  mushroom: { label: 'mushroom', icon: '🍄', pickup: true },
+  glowcap: { label: 'glowcap', icon: '🍄', img: 'glowcap', pickup: true },
+  crystal_shard: { label: 'crystal shard', icon: '💎', img: 'crystal', pickup: true },
+  stew: { label: 'stew', icon: '🍲', img: 'stew-bowl' },
 };
-ITEM_INFO.wood.desc = 'Sticks and logs. Burns, and builds things.';
-ITEM_INFO.stone.desc = 'Solid cave stone for hearths and footings.';
+for (const [k, line] of Object.entries(STORY.itemFlavor.items)) if (ITEM_INFO[k]) ITEM_INFO[k].desc = line;
+export const PICKUP_KINDS = Object.keys(ITEM_INFO).filter((k) => ITEM_INFO[k].pickup);
 
 function primitiveParts(kind) {
   if (kind === 'wood') {
@@ -35,7 +39,7 @@ function primitiveParts(kind) {
     const g = mergeGeometries([stem.toNonIndexed(), cap.toNonIndexed()]);
     return [{ geometry: g, material: lambert(0x3fd9e0, { emissive: 0x2fc6d6, emissiveIntensity: 1.6 }) }];
   }
-  if (kind === 'shard') {
+  if (kind === 'crystal_shard') {
     const g = new THREE.OctahedronGeometry(0.09, 0); g.scale(0.7, 1.8, 0.7); g.rotateZ(0.25); g.translate(0, 0.14, 0);
     return [{ geometry: g, material: lambert(0x9a6ee0, { emissive: 0x7a4fd0, emissiveIntensity: 2.0 }) }];
   }
@@ -94,11 +98,11 @@ export class Items {
     };
     place2('mushroom', CONFIG.items.mushroom, [mossdrip, glowcapCh, lanternmouth], 0.7);
     place2('glowcap', CONFIG.items.glowcap, [glowcapCh], 0.75);
-    place2('shard', CONFIG.items.shard, [flintseam], 0.8);
+    place2('crystal_shard', CONFIG.items.crystal_shard, [flintseam], 0.8);
 
     this.meshes = {};
     const idx = {};
-    for (const kind of Object.keys(ITEM_INFO)) {
+    for (const kind of PICKUP_KINDS) {
       const n = this.list.filter((i) => i.kind === kind).length;
       const parts = bakeParts(sources[kind] || primitiveParts(kind));
       this.meshes[kind] = parts.map((pt) => {
@@ -143,6 +147,19 @@ export class Items {
   pickUp(it) {
     it.alive = false; this._set(it, ZERO); if (this._last === it) this._last = null;
     it.respawnAt = this._t + (CONFIG.items.respawn[it.kind] ?? 300);
+  }
+
+  /** Nearest alive item to `pos` within r (optionally also within r2 of pos2). */
+  nearest(pos, r, pos2 = null, r2 = Infinity) {
+    let best = null, bd = r;
+    for (const it of this.list) {
+      if (!it.alive) continue;
+      const d = Math.hypot(it.pos.x - pos.x, it.pos.z - pos.z);
+      if (d >= bd) continue;
+      if (pos2 && Math.hypot(it.pos.x - pos2.x, it.pos.z - pos2.z) > r2) continue;
+      bd = d; best = it;
+    }
+    return best;
   }
 
   /** Items alive per kind (debug / smoke test). */

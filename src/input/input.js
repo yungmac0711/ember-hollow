@@ -58,6 +58,8 @@ export class Input {
       if (/^Digit[1-9]$/.test(e.code)) this.pressed.add('slot' + e.code.slice(5));
       if (e.code === 'Digit0') this.pressed.add('slot10');
       if (e.code === 'KeyT' || e.code === 'Enter') { this.pressed.add('chat'); e.preventDefault(); }
+      if (e.code === 'KeyG') this.pressed.add('stick');
+      if (e.code === 'Escape' || e.code === 'KeyP') this.pressed.add('pause');
     });
     window.addEventListener('keyup', (e) => {
       this._keys.delete(e.code);

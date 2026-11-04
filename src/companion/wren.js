@@ -7,10 +7,11 @@
 // Her grandmother's waylamp is a light *emitter* (§8: #E08A2E, 3.0, 6, decay 2) that competes for a
 // slot in the LightBudget and fades out inside a lit campfire's radius.
 import * as THREE from 'three';
+import { steer } from '../world/colliders.js';
 import { CONFIG } from '../config.js';
 import { lambert } from '../assets.js';
 import { Emitter } from '../render/lights.js';
-import { liftCharacter } from '../render/character-materials.js';
+import { liftCharacter, skinCharacter } from '../render/character-materials.js';
 import { WrenAnimator } from './wren-anim.js';
 
 export function buildWrenPrimitive() {
@@ -74,6 +75,7 @@ export class Wren {
       this.root.add(this.lampNode);
     }
     liftCharacter(this.root); // STYLE_GUIDE §8 backlight fix (lantern crystal keeps its own glow)
+    if (this.anim?.ok) skinCharacter(this.model, (n) => n === this.anim.hoodUp || n === this.anim.hoodDown); // hood swap stays separate
     this.lightOn = 1;
     // blob shadow
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.35, 12),
@@ -114,7 +116,21 @@ export class Wren {
     const inFire = fire && Math.hypot(pp.x - fire.pos.x, pp.z - fire.pos.z) < fire.lightRadius;
     const selfInFire = fire && Math.hypot(this.pos.x - fire.pos.x, this.pos.z - fire.pos.z) < fire.lightRadius;
     let moveSpeed = 0, face = pp;
-    if (inFire && !talking) {
+    // Chunk B: she helps gather — now and then she picks up something next to her and hands it to Cam
+    this.gatherT = (this.gatherT ?? 20 + Math.random() * 15) - dt;
+    if (!this.gathering && this.gatherT <= 0 && !talking && env.items) {
+      this.gatherT = 20 + Math.random() * 20;
+      const it = env.items.nearest(this.pos, 3, pp, 6);
+      if (it) { this.gathering = it; this._gatherTime = 0; }
+    }
+    if (this.gathering) {
+      const it = this.gathering;
+      this._gatherTime += dt;
+      const d = Math.hypot(it.pos.x - this.pos.x, it.pos.z - this.pos.z);
+      if (!it.alive || this._gatherTime > 8 || talking) this.gathering = null;
+      else if (d > 0.7) { moveSpeed = Math.min(2.6, 0.8 + d); face = it.pos; this.state = 'gather'; }
+      else { env.onGather?.(it); this.gathered = (this.gathered || 0) + 1; this.gathering = null; }
+    } else if (inFire && !talking) {
       // settle on the far side of the fire from Biscuit and warm her hands
       const ang = Math.atan2(pp.z - fire.pos.z, pp.x - fire.pos.x) - 1.0;
       this.target.set(fire.pos.x + Math.cos(ang) * 1.55, 0, fire.pos.z + Math.sin(ang) * 1.55);
@@ -130,11 +146,12 @@ export class Wren {
       this.cave.resolve(this.target, 0.6);
       const d = Math.hypot(this.target.x - this.pos.x, this.target.z - this.pos.z);
       const dp = Math.hypot(pp.x - this.pos.x, pp.z - this.pos.z);
-      if (dp > 25) { this.pos.copy(this.target); }
+      if (dp > 25) { this.colliders?.resolve(this.target, 0.35); this.pos.copy(this.target); }
       if (d > 0.8 && !talking) { moveSpeed = Math.min(5, 1 + d * 1.3); face = d > 1.5 ? this.target : pp; this.state = 'follow'; }
       else this.state = 'idle';
     }
-    const want = Math.atan2(face.x - this.pos.x, face.z - this.pos.z);
+    let want = Math.atan2(face.x - this.pos.x, face.z - this.pos.z);
+    if (moveSpeed > 0.3) want = steer(this.colliders, this.pos, want, 0.35, this._steer || (this._steer = {}));
     let dh = want - this.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     const turn = dh * Math.min(1, dt * 6);
     this.heading += turn;
@@ -142,9 +159,19 @@ export class Wren {
     if (this.speed > 0.02) {
       this.pos.x += Math.sin(this.heading) * this.speed * dt;
       this.pos.z += Math.cos(this.heading) * this.speed * dt;
+      const ox = this.pos.x, oz = this.pos.z;
       this.cave.resolve(this.pos, 0.6);
+      this.colliders?.resolve(this.pos, 0.35);
+      // stuck behind a wall for a while (target unreachable) → step out beside Cam
+      const moved = Math.hypot(this.pos.x - ox, this.pos.z - oz) / Math.max(dt, 1e-4);
+      this._stuckT = moveSpeed > 1 && moved < this.speed * 0.25 ? (this._stuckT || 0) + dt : 0;
+      if (this._stuckT > 2.5) {
+        this._stuckT = 0; this.gathering = null;
+        const back = player.forward.clone().multiplyScalar(-1.4).add(pp);
+        this.cave.resolve(back, 0.6); this.colliders?.resolve(back, 0.35); this.pos.copy(back);
+      }
     }
-    this.pos.y = this.cave.floorAt(this.pos.x, this.pos.z);
+    this.pos.y = Math.max(this.cave.floorAt(this.pos.x, this.pos.z), this.floorAt ? this.floorAt(this.pos.x, this.pos.z) : -Infinity);
     this.root.position.copy(this.pos);
     this.root.rotation.y = this.heading;
 

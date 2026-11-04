@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Headless smoke test: loads the game in an emulated iPhone (landscape, touch), checks for console
-// errors, plays a scripted run (gather → light a fire → refuel → chat), and saves screenshots.
+// errors, plays a scripted run (title → gather → light a fire → refuel → chat → build → Biscuit /
+// requests / notes → save + reload), and saves screenshots.
 // Needs the game served at BASE (default http://localhost:8931/) and `npm i` (playwright).
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -26,9 +27,23 @@ page.on('response', (r) => { if (r.status() >= 400) failed.push(`${r.status()} $
 
 await page.goto(BASE + 'index.html?fps=1' + (process.env.QUERY ? '&' + process.env.QUERY : ''), { waitUntil: 'load' });
 await page.waitForFunction(() => window.__game?.ready, null, { timeout: 60000 });
+await page.waitForTimeout(1200); // title backdrop orbit
 await page.screenshot({ path: OUT + 'test-output/01-start.png' });
-await page.touchscreen.tap(422, 300); // "Tap to begin"
+// Title screen (ui_text.json): fresh context → no save → no Continue; real touch on New Game
+const title = await page.evaluate(async () => {
+  const { STORY } = await import('./src/data/story.js');
+  const $ = (id) => document.getElementById(id);
+  return { name: $('title-name').textContent, nameOk: $('title-name').textContent === STORY.uiText.title, taglineOk: $('title-tagline').textContent === STORY.uiText.tagline,
+    tip: $('title-tip').textContent, continueShown: !$('title-continue').hidden, newGame: $('title-new').textContent, backdropFire: __game.fires.fires.length, audioLocked: !__game.audio?.unlocked };
+});
+{
+  const b = await page.$eval('#title-new', (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.touchscreen.tap(b[0], b[1]);
+}
 await page.waitForTimeout(1500);
+title.started = await page.evaluate(() => document.getElementById('start').classList.contains('hidden'));
+title.backdropFireRemoved = await page.evaluate(() => __game.fires.fires.length === 0);
+title.pass = title.nameOk && title.taglineOk && !title.continueShown && title.started && title.backdropFireRemoved;
 await page.screenshot({ path: OUT + 'test-output/02-spawn.png' });
 const spawnPerf = await page.evaluate(() => ({ calls: __game.renderer.info.render.calls, tris: __game.renderer.info.render.triangles, activePointLights: __game.budget.activeCount }));
 
@@ -146,7 +161,7 @@ m1.chop = await page.evaluate(async () => {
 // 3. new pickups
 m1.pickups = await page.evaluate(async () => {
   const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
-  for (const kind of ['mushroom', 'glowcap', 'shard']) {
+  for (const kind of ['mushroom', 'glowcap', 'crystal_shard']) {
     const it = g.items.list.filter((i) => i.alive && i.kind === kind).sort((a, b) => a.pos.distanceTo(g.player.pos) - b.pos.distanceTo(g.player.pos))[0];
     if (!it) { out[kind] = 'none'; continue; }
     g.player.pos.set(it.pos.x + 0.6, it.pos.y, it.pos.z + 0.6); g.player.yaw = Math.atan2(0.6, 0.6);
@@ -291,6 +306,68 @@ m1.touchUI = await (async () => {
   return out;
 })();
 
+// ---------------------------------------------------------------- M1 chunk B: Biscuit, Wren, requests, notes
+const m2 = {};
+m2.bankAdapter = await page.evaluate(() => __game.chat.adapter.constructor.name);
+m2.bankReply = chatLog[chatLog.length - 1] || '';
+// pet → hearts + play-bow; fetch → stick thrown, retrieved, dropped at Cam's feet
+m2.pet = await page.evaluate(async () => {
+  const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  g.puppy.pos.set(g.player.pos.x + 1, g.player.pos.y, g.player.pos.z + 0.6); await wait(100);
+  g.puppy.pet(); await wait(200);
+  return { state: g.puppy.state, mood: g.puppy.mood };
+});
+await page.waitForTimeout(2500);
+m2.fetch = await page.evaluate(async () => {
+  const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const c = g.cave.chambers[0], p = g.player;
+  p.pos.set(c.x + 2, g.cave.floorAt(c.x + 2, c.z + 3), c.z + 3); p.yaw = Math.atan2(-(c.x - 1 - p.pos.x), -(c.z - 2 - p.pos.z)); p.pitch = 0;
+  g.puppy.pos.set(p.pos.x + 0.9, p.pos.y, p.pos.z + 0.4); g.puppy._setState?.('follow');
+  await wait(300);
+  const f0 = g.puppy.fetches;
+  g.input.pressed.add('stick'); await wait(150);
+  const thrown = g.puppy.stick.state;
+  for (let t = 0; t < 120 && g.puppy.fetches === f0; t++) await wait(100);
+  return { thrown, fetched: g.puppy.fetches - f0, stick: g.puppy.stick.state };
+});
+m2.dig = await page.evaluate(async () => {
+  const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const n0 = g.digLog.length, inv0 = JSON.stringify(g.player.inventory);
+  g.puppy.startDig();
+  for (let t = 0; t < 50 && g.digLog.length === n0; t++) await wait(100);
+  return { found: g.digLog.slice(n0), invChanged: JSON.stringify(g.player.inventory) !== inv0, mood: g.puppy.mood };
+});
+await page.screenshot({ path: OUT + 'test-output/07-biscuit.png' });
+// a request: Wren offers one, Cam brings the needs, "Give to Wren" (real touch) completes it
+m2.request = await page.evaluate(async () => {
+  const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  g.wren.pos.set(g.player.pos.x + 1.5, g.player.pos.y, g.player.pos.z);
+  g.talkRequests(); await wait(200);
+  const r = g.requests.current; if (!r) return { offered: false };
+  for (const n of r.needs) g.player.inventory[n.item] = Math.max(g.player.inventory[n.item] || 0, n.count);
+  await wait(300);
+  return { offered: true, id: r.id, title: r.title, trackerShown: !document.getElementById('request').classList.contains('hidden'), giveShown: !document.getElementById('rq-give').classList.contains('hidden') };
+});
+if (m2.request.giveShown) {
+  const b = await page.$eval('#rq-give', (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(300);
+}
+Object.assign(m2.request, await page.evaluate((id) => ({ completed: __game.requests.done.has(id), active: __game.requests.active, unlocked: [...__game.requests.unlocked], line: __game.ambient.log?.slice(-1)[0]?.line }), m2.request.id));
+// a lore note: open in the parchment reader, close with a real tap on ✕, lands in the journal
+m2.note = await page.evaluate(async () => {
+  const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), n = g.lore.notes[0];
+  g.openNote(n.id); await wait(250);
+  return { id: n.id, title: n.title, readerOpen: !document.getElementById('reader').classList.contains('hidden'), text: document.querySelector('#reader .pr-text').textContent.slice(0, 60) };
+});
+await page.screenshot({ path: OUT + 'test-output/08-note.png' });
+{
+  const b = await page.$eval('#reader .pr-close', (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(250);
+}
+Object.assign(m2.note, await page.evaluate((id) => ({ readerClosed: document.getElementById('reader').classList.contains('hidden'), inJournal: __game.lore.journal().some((j) => j.id === id) }), m2.note.id));
+m2.pass = m2.bankAdapter === 'BankAdapter' && !!m2.bankReply && m2.pet.state === 'petted' && m2.fetch.fetched === 1 && m2.dig.found.length === 1
+  && !!m2.request.completed && m2.note.readerOpen && m2.note.readerClosed && m2.note.inJournal;
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
@@ -317,8 +394,29 @@ m1.perf60 = await page.evaluate(async () => {
   return { pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount };
 });
 await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
+// ---------------------------------------------------------------- save → reload → Continue
+const saved = await page.evaluate(() => {
+  const g = __game; g.player.inventory.mushroom = 7; g.saveNow('test');
+  const d = JSON.parse(localStorage.getItem('ember_hollow.save'));
+  return { v: d.v, pieces: d.pieces.length, inv: d.inventory, notes: d.notes, done: d.requests.done, pos: d.player, chest: d.pieces.filter((p) => p.store).length };
+});
+await page.reload({ waitUntil: 'load' });
+await page.waitForFunction(() => window.__game?.ready, null, { timeout: 60000 });
+const reload = await page.evaluate(() => ({ continueShown: !document.getElementById('title-continue').hidden }));
+if (reload.continueShown) {
+  const b = await page.$eval('#title-continue', (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(1500);
+}
+Object.assign(reload, await page.evaluate((s) => {
+  const g = __game;
+  return { started: document.getElementById('start').classList.contains('hidden'), pieces: g.build.pieces.length, mushroom: g.player.inventory.mushroom,
+    notesRead: g.lore.read.size, requestsDone: g.requests.done.size, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2) };
+}, saved));
+reload.pass = reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5;
+await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
+
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !reload.pass ? 1 : 0);

@@ -2,8 +2,12 @@
 // 2 m cells laid on the 1 m grid (cell centres on even metres, edges on odd metres; the art's
 // pieces are 2 m wide): floors/props/roofs snap to cells, walls/windows/doors to cell edges. Use places,
 // ⟳ rotates (props/floors/roofs in 90° steps, edge pieces flip which way they face), 🗑 toggles
-// remove mode (full refund). Every piece type is ONE InstancedMesh per material part (doors and
-// chest lids get their own animated instanced part), so 60+ pieces cost ~12 draw calls.
+// remove mode (full refund). While pieces are being placed every type is ONE InstancedMesh per
+// material part; once the build has been idle for a moment (Chunk B) all static parts of every piece
+// are merged into ONE vertex-coloured mesh (+ one unlit mesh for glowing parts), so a 60-piece shelter
+// costs ~2 draw calls + 1 per animated part type (door leaves, chest lids, chime). Chunk B also adds
+// decorations (rug / hanging / prop), keepsakes on table + chest tops, save/restore, and the
+// enclosure test (floor + walls + door + roof) behind inShelter and shelter_complete.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG } from '../config.js';
@@ -16,7 +20,7 @@ const CAP = 96; // instances per piece type
 const HALF = Math.PI / 2;
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1);
-const _yAxis = new THREE.Vector3(0, 1, 0), _xAxis = new THREE.Vector3(1, 0, 0);
+const _yAxis = new THREE.Vector3(0, 1, 0), _xAxis = new THREE.Vector3(1, 0, 0), _zAxis = new THREE.Vector3(0, 0, 1);
 
 // ------------------------------------------------------------------ geometry prep
 function strip(g, keepUv) {
@@ -30,6 +34,24 @@ function bakeColor(g, color) {
   g.setAttribute('color', new THREE.BufferAttribute(a, 3));
   return g;
 }
+const isGlow = (m) => !!(m.isMeshBasicMaterial || (m.emissive && m.emissive.getHex() !== 0 && m.emissiveIntensity > 0));
+/** Geometry for the idle static batch: position + normal + baked colour (glow parts → emissive colour). */
+export function batchGeometry(p) {
+  if (p.material.map) return null; // textured parts stay instanced
+  const g = strip(p.geometry, false);
+  const src = p.geometry.attributes.color;
+  const glow = isGlow(p.material);
+  const c = glow ? (p.material.isMeshBasicMaterial ? p.material.color.clone() : p.material.emissive.clone().multiplyScalar(Math.min(2, p.material.emissiveIntensity)))
+    : p.material.color;
+  if (src && !glow) {
+    const flat = p.geometry.index ? p.geometry.toNonIndexed().attributes.color : src;
+    const a = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < a.length / 3; i++) { a[i * 3] = flat.getX(i) * c.r; a[i * 3 + 1] = flat.getY(i) * c.g; a[i * 3 + 2] = flat.getZ(i) * c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+  } else bakeColor(g, c);
+  return { geometry: g, glow };
+}
+
 /** Merge static parts into as few draw calls as possible (same texture → 1; untextured → vertex colours). */
 function mergeParts(parts) {
   if (parts.length <= 1) return parts;
@@ -72,7 +94,8 @@ function fallback(type) {
 // pieces run along local Z with their front facing local +X)
 const RY90 = new THREE.Matrix4().makeRotationY(HALF); // art walls run along X, front +Z → along Z, front +X
 const PREP = {
-  floor: {}, roof: {}, lantern: {}, bedroll: {},
+  lantern: { exclude: ['lantern_R'] }, // the base lantern is one lamp; lantern_double (request reward) has both
+  crystal_wind_chime: { anim: 'chimes', pivot: new THREE.Vector3(0, -0.13, 0), sway: true },
   wall: { raw: RY90 }, window: { raw: RY90 },
   door: { raw: RY90, anim: 'door_hinge', pivot: new THREE.Vector3(-0.39, 0, 0), angle: -100 },
   chest: { anim: 'lid_hinge', pivot: new THREE.Vector3(0, 0.45, -0.25), angle: -75 }, // pivots in file units
@@ -82,12 +105,13 @@ const PREP = {
 export async function loadPieceParts() {
   const out = {};
   await Promise.all(PIECE_ORDER.map(async (type) => {
-    const def = PIECES[type], prep = PREP[type];
+    const def = PIECES[type], prep = PREP[type] || {};
     if (!def.model) return;
     const parts = await loadParts(def.model, { raw: true });
     if (!parts) { out[type] = fallback(type); return; }
     const stat = [], animParts = [];
     for (const p of parts) {
+      if (prep.exclude && (prep.exclude.includes(p.node) || p.ancestors?.some((a) => prep.exclude.includes(a)))) continue;
       if (prep.raw) p.geometry.applyMatrix4(prep.raw);
       (prep.anim && (p.node === prep.anim || p.ancestors?.includes(prep.anim)) ? animParts : stat).push(p);
     }
@@ -115,6 +139,7 @@ export class BuildSystem {
     this.batches = {};
     for (const type of PIECE_ORDER) {
       const src = type === 'hearth' ? { static: [] } : (partsByType[type] || fallback(type));
+      for (const p of src.static) p.batch = batchGeometry(p);
       const b = { src, items: [], stat: [], anim: null };
       for (const p of src.static) { const im = new THREE.InstancedMesh(p.geometry, p.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; scene.add(im); b.stat.push(im); }
       if (src.anim) { const im = new THREE.InstancedMesh(src.anim.geometry, src.anim.material, CAP); im.count = 0; im.visible = false; im.frustumCulled = false; scene.add(im); b.anim = im; }
@@ -127,6 +152,22 @@ export class BuildSystem {
     this.floorTop = 0.2;
     const fs = partsByType.floor?.static?.[0]?.geometry;
     if (fs) { fs.computeBoundingBox(); this.floorTop = fs.boundingBox.max.y; }
+    // surface heights (table / chest tops) for keepsakes
+    this.surfaceTop = {};
+    for (const t of ['table', 'chest']) {
+      const b = this.batches[t], box = new THREE.Box3();
+      for (const p of b.src.static) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); }
+      if (b.src.anim) { const g = b.src.anim.geometry; g.computeBoundingBox(); box.union(g.boundingBox.clone().translate(b.src.anim.pivot)); }
+      this.surfaceTop[t] = box.isEmpty() ? 0.7 : box.max.y;
+    }
+    // idle static batch (one plain + one glow mesh for every placed piece)
+    this.batchPlain = new THREE.Mesh(new THREE.BufferGeometry(), lambert(0xffffff, { vertexColors: true }));
+    this.batchGlow = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true }));
+    for (const m of [this.batchPlain, this.batchGlow]) { m.visible = false; m.matrixAutoUpdate = false; scene.add(m); }
+    this._dirty = false; this._idle = 0; this.batched = false;
+    this._enclosed = new Set(); this._encDirty = true;
+    this.onChange = null; // (piece, added) => void
+    this.time = 0;
   }
 
   // ---------------------------------------------------------------- mode + selection
@@ -219,6 +260,37 @@ export class BuildSystem {
       if (ok && this.slots.has(key)) { ok = false; why = 'Something is already there'; }
       return { type, key, i, j, x, y, z, yaw, ok, why };
     }
+    if (def.slot === 'rug') {
+      const y = (this._cellPiece(i, j, 'cell') ? this.cellBase(i, j) : this.cave.floorAt(x, z)) + 0.006;
+      const key = `rug:${i},${j}`;
+      if (this.cave.field(x, z) < 0.9) { ok = false; why = 'Too close to the cave wall'; }
+      if (ok && this.slots.has(key)) { ok = false; why = 'There’s a rug here already'; }
+      if (ok && this.blocked?.(x, z, 0.8)) { ok = false; why = 'A tree or rock is in the way'; }
+      return { type, key, i, j, x, y, z, yaw, ok, why };
+    }
+    if (def.slot === 'hang') {
+      const r = this._cellPiece(i, j, 'roof');
+      const key = `hang:${i},${j}`;
+      const y = r ? r.y - 0.04 : this.cave.floorAt(x, z) + H;
+      if (!r) { ok = false; why = 'Hang it under a roof'; }
+      if (ok && this.slots.has(key)) { ok = false; why = 'Something already hangs here'; }
+      return { type, key, i, j, x, y, z, yaw, ok, why };
+    }
+    if (def.slot === 'surface') {
+      // nearest table/chest in front of Cam with a free spot on top
+      let host = null, hd = Infinity;
+      for (const q of this.pieces) {
+        if (q.type !== 'table' && q.type !== 'chest') continue;
+        const d = Math.hypot(q.x - ax, q.z - az);
+        if (d < 1.6 && d < hd) { hd = d; host = q; }
+      }
+      if (!host) return { type, key: null, i, j, x: ax, y: this.cave.floorAt(ax, az), z: az, yaw, ok: false, why: 'Aim at a table or chest' };
+      const spots = host.type === 'table' ? [[-0.25, -0.2], [0.25, -0.2], [-0.25, 0.2], [0.25, 0.2]] : [[-0.2, 0], [0.2, 0], [0, -0.12], [0, 0.12]];
+      let k = spots.findIndex((_, n) => !this.slots.has(`surf:${host.id}:${n}`));
+      if (k < 0) return { type, key: null, i, j, x: host.x, y: host.y + this.surfaceTop[host.type], z: host.z, yaw, ok: false, why: 'That top is full' };
+      const [lx, lz] = spots[k], c = Math.cos(host.yaw), sn = Math.sin(host.yaw);
+      return { type, key: `surf:${host.id}:${k}`, parent: host.id, i: host.i, j: host.j, x: host.x + lx * c + lz * sn, y: host.y + this.surfaceTop[host.type] + 0.002, z: host.z - lx * sn + lz * c, yaw: host.yaw + yaw, ok: true, why: '' };
+    }
     // prop
     const y = this._cellPiece(i, j, 'cell') ? this.cellBase(i, j) : this.cave.floorAt(x, z);
     const key = `prop:${i},${j}`;
@@ -240,7 +312,8 @@ export class BuildSystem {
       const d = Math.hypot(p.x - ax, p.z - az);
       if (d > 1.7) continue;
       const slot = PIECES[p.type].slot;
-      const s = d + (slot === 'cell' ? 0.7 : 0) + (slot === 'roof' ? (up ? -0.8 : 1.2) : 0) + (slot === 'edge' ? -0.1 : 0);
+      const s = d + (slot === 'cell' ? 0.7 : 0) + (slot === 'rug' ? 0.5 : 0) + (slot === 'roof' ? (up ? -0.8 : 1.2) : 0)
+        + (slot === 'hang' ? (up ? -0.9 : 0.6) : 0) + (slot === 'edge' ? -0.1 : 0) + (slot === 'surface' ? -0.45 : 0);
       if (s < bs) { bs = s; best = p; }
     }
     return best;
@@ -277,6 +350,7 @@ export class BuildSystem {
     this.ghost.visible = true;
     this.ghost.scale.setScalar(1);
     this.ghost.position.set(t.x, t.y + 0.01, t.z); this.ghost.rotation.set(0, t.yaw, 0);
+    if (PIECES[t.type].slot === 'surface') this.ghost.scale.setScalar(1.6); // keepsakes are tiny
     this._affordable = this.canAfford(player.inventory);
     this.ghostMat.color.setHex(t.ok && this._affordable ? 0x6fdc8c : 0xff6a6a);
   }
@@ -292,14 +366,42 @@ export class BuildSystem {
     _m.copy(p.matrix).multiply(_m2.makeTranslation(piv.x, piv.y, piv.z));
     // door_hinge Y → −100°, lid_hinge X → −75° (art notes)
     if (p.type === 'door') _m.multiply(_m2.makeRotationAxis(_yAxis, -p.open * 1.745));
-    else _m.multiply(_m2.makeRotationAxis(_xAxis, -p.open * 1.309));
+    else if (p.type === 'crystal_wind_chime') { // gentle draft sway
+      const t = this.time + p.id * 1.7;
+      _m.multiply(_m2.makeRotationAxis(_xAxis, Math.sin(t * 1.3) * 0.12)).multiply(_m2.makeRotationAxis(_zAxis, Math.sin(t * 0.9 + 1) * 0.1));
+    } else _m.multiply(_m2.makeRotationAxis(_xAxis, -p.open * 1.309));
     b.anim.setMatrixAt(p.index, _m); b.anim.instanceMatrix.needsUpdate = true;
   }
   _syncCount(type) {
     const b = this.batches[type];
     const n = b.items.length;
-    for (const im of b.stat) { im.count = n; im.visible = n > 0; } // empty instanced meshes still cost a call
+    b.stat.forEach((im, k) => { im.count = n; im.visible = n > 0 && !(this.batched && b.src.static[k].batch); }); // empty instanced meshes still cost a call
     if (b.anim) { b.anim.count = n; b.anim.visible = n > 0; }
+  }
+  /** Something changed: show the live instanced meshes until the build has been idle for a moment. */
+  _changed() {
+    this._dirty = true; this._idle = 0; this._encDirty = true;
+    if (this.batched) { this.batched = false; this.batchPlain.visible = this.batchGlow.visible = false; for (const t of PIECE_ORDER) this._syncCount(t); }
+  }
+  /** Merge every placed piece's static parts into the two batch meshes (rebuilt only when idle). */
+  _rebuildBatch() {
+    const plain = [], glow = [];
+    for (const p of this.pieces) {
+      for (const part of this.batches[p.type].src.static) {
+        if (!part.batch) continue;
+        const g = part.batch.geometry.clone().applyMatrix4(p.matrix);
+        (part.batch.glow ? glow : plain).push(g);
+      }
+    }
+    for (const [mesh, list] of [[this.batchPlain, plain], [this.batchGlow, glow]]) {
+      mesh.geometry.dispose();
+      mesh.geometry = list.length ? mergeGeometries(list) : new THREE.BufferGeometry();
+      list.forEach((g) => g.dispose());
+      if (list.length) mesh.geometry.computeBoundingSphere();
+      mesh.visible = list.length > 0;
+    }
+    this._dirty = false; this.batched = true;
+    for (const t of PIECE_ORDER) this._syncCount(t);
   }
   /** Place the current ghost. Returns {ok, why?, piece?}. */
   place(inv) {
@@ -310,14 +412,38 @@ export class BuildSystem {
     const b = this.batches[t.type];
     if (b.items.length >= CAP) return { ok: false, why: 'That’s plenty of those' };
     for (const [k, n] of Object.entries(PIECES[t.type].cost)) inv[k] -= n;
-    const p = { id: ++this._id, type: t.type, key: t.key, i: t.i, j: t.j, side: t.side, x: t.x, y: t.y, z: t.z, yaw: t.yaw, open: 0, openTarget: 0, colliders: [] };
+    const p = this._add(t);
+    return { ok: true, piece: p };
+  }
+  _add(t, id = ++this._id) {
+    const b = this.batches[t.type];
+    const p = { id, type: t.type, key: t.key, i: t.i, j: t.j, side: t.side, x: t.x, y: t.y, z: t.z, yaw: t.yaw, parent: t.parent ?? null, open: 0, openTarget: 0, colliders: [] };
     p.matrix = new THREE.Matrix4().compose(_v.set(p.x, p.y, p.z), _q.setFromAxisAngle(_yAxis, p.yaw), _one);
     p.index = b.items.length; b.items.push(p); this._syncCount(t.type);
     this._write(p);
     this.pieces.push(p); this.slots.set(p.key, p);
     this._attach(p);
-    return { ok: true, piece: p };
+    this._changed();
+    this.onChange?.(p, true);
+    return p;
   }
+
+  // ---------------------------------------------------------------- save / restore
+  serialize() {
+    return this.pieces.map((p) => ({ id: p.id, type: p.type, key: p.key, i: p.i, j: p.j, side: p.side, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(4),
+      parent: p.parent, open: p.openTarget ? 1 : 0, store: p.store ? { ...p.store } : undefined }));
+  }
+  /** Re-create saved pieces (no cost). Unknown types are skipped. */
+  restore(list = []) {
+    for (const d of list) {
+      if (!PIECES[d.type] || !d.key || this.slots.has(d.key)) continue;
+      const p = this._add(d, d.id);
+      this._id = Math.max(this._id, d.id || 0);
+      if (d.open) { p.open = p.openTarget = 1; if (this.batches[p.type].anim) this._writeAnim(p); if (p.leaf) p.leaf.on = false; }
+      if (p.store && d.store) Object.assign(p.store, d.store);
+    }
+  }
+  clearAll() { for (const p of [...this.pieces]) if (this.pieces.includes(p)) this.remove({}, p, true); }
 
   _attach(p) {
     const C = this.colliders;
@@ -332,9 +458,13 @@ export class BuildSystem {
       }
       case 'chest': p.colliders.push(C.circle(p.x, p.z, 0.4)); p.store = {}; break;
       case 'table': p.colliders.push(C.circle(p.x, p.z, 0.5)); break;
-      case 'lantern': {
+      case 'lakeside_bench': p.colliders.push(C.box(p.x, p.z, 0.25, 0.8, p.yaw + HALF)); break;
+      case 'biscuit_bed': p.sleepPoint = new THREE.Vector3(p.x, p.y + 0.12, p.z); break; // sleep_point node
+      case 'lantern': case 'lantern_double': {
         p.colliders.push(C.circle(p.x, p.z, 0.15));
-        p.glowPos = new THREE.Vector3(p.x, p.y + 1.55, p.z); // between lantern_L/R (emissive glass)
+        // single lamp = lantern_L (-0.38 m along local X); the double glows between both
+        const off = p.type === 'lantern' ? -0.38 : 0;
+        p.glowPos = new THREE.Vector3(p.x + Math.cos(p.yaw) * off, p.y + 1.55, p.z - Math.sin(p.yaw) * off);
         p.emitter = this.budget?.add(new Emitter({ color: 0xffb35c, intensity: 3.0, distance: 6, decay: 2, priority: 1 }));
         if (p.emitter) p.emitter.pos.copy(p.glowPos);
         break;
@@ -345,11 +475,12 @@ export class BuildSystem {
   }
 
   /** Remove the targeted piece (remove mode) with a full refund. Returns {ok, why?, refund?, piece?, contents?}. */
-  remove(inv, piece = this.target?.remove) {
+  remove(inv, piece = this.target?.remove, force = false) {
     if (!piece) return { ok: false, why: 'Aim at a piece to remove' };
     const slot = PIECES[piece.type].slot;
-    if (slot === 'cell' && (this._cellPiece(piece.i, piece.j, 'prop') || this._cellPiece(piece.i, piece.j, 'roof'))) return { ok: false, why: 'Clear what’s on this floor first' };
-    if (slot === 'edge') {
+    if (!force && slot === 'cell' && (this._cellPiece(piece.i, piece.j, 'prop') || this._cellPiece(piece.i, piece.j, 'roof') || this._cellPiece(piece.i, piece.j, 'rug'))) return { ok: false, why: 'Clear what’s on this floor first' };
+    if (!force && slot === 'roof' && this._cellPiece(piece.i, piece.j, 'hang')) return { ok: false, why: 'Take down what hangs here first' };
+    if (slot === 'edge' && !force) {
       // a roof must keep at least one supporting wall
       for (const [a, b] of this._edgeCells(piece.i, piece.j, piece.side)) {
         const r = this._cellPiece(a, b, 'roof'); if (!r) continue;
@@ -358,7 +489,9 @@ export class BuildSystem {
       }
     }
     const refund = { ...PIECES[piece.type].cost };
-    for (const [k, n] of Object.entries(refund)) inv[k] = (inv[k] || 0) + n;
+    // keepsakes on a table/chest top come back with it
+    for (const q of this.pieces.filter((q) => q.parent === piece.id)) { const r = this.remove(inv, q, true); for (const [k, n] of Object.entries(r.refund || {})) refund[k] = (refund[k] || 0) + n; }
+    for (const [k, n] of Object.entries(PIECES[piece.type].cost)) inv[k] = (inv[k] || 0) + n;
     let contents = null;
     if (piece.store) { contents = { ...piece.store }; for (const [k, n] of Object.entries(piece.store)) inv[k] = (inv[k] || 0) + n; }
     for (const c of piece.colliders) this.colliders.remove(c);
@@ -373,6 +506,8 @@ export class BuildSystem {
     this._syncCount(piece.type);
     this.pieces = this.pieces.filter((p) => p !== piece); this.slots.delete(piece.key);
     if (this.target?.remove === piece) this.target = null;
+    this._changed();
+    this.onChange?.(piece, false);
     return { ok: true, refund, piece, contents };
   }
 
@@ -408,6 +543,10 @@ export class BuildSystem {
   setChestOpen(p, on) { p.openTarget = on ? 1 : 0; }
 
   _animate(dt) {
+    this.time += dt;
+    if (this._dirty && (this._idle += dt) > 0.6) this._rebuildBatch();
+    const chime = this.batches.crystal_wind_chime;
+    if (chime?.anim && chime.items.length) for (const p of chime.items) this._writeAnim(p);
     for (const p of this.pieces) {
       if (p.open === p.openTarget || (p.type !== 'door' && p.type !== 'chest')) continue;
       const step = dt * (p.type === 'door' ? 2.6 : 3.2);
@@ -424,6 +563,34 @@ export class BuildSystem {
     return t ? t.y + this.floorTop : -Infinity;
   }
   counts() { const c = {}; for (const p of this.pieces) c[p.type] = (c[p.type] || 0) + 1; return c; }
+  /** Enclosed floor cells: connected floor tiles whose every outer edge is a wall/window/door, with at
+   * least one door and a roof over every tile. Cached until something changes. */
+  enclosedCells() {
+    if (!this._encDirty) return this._enclosed;
+    const out = new Set(), seen = new Set();
+    for (const f of this.pieces) {
+      if (f.type !== 'floor' || seen.has(`${f.i},${f.j}`)) continue;
+      const comp = [], stack = [[f.i, f.j]]; let leak = false, door = false;
+      seen.add(`${f.i},${f.j}`);
+      while (stack.length) {
+        const [i, j] = stack.pop(); comp.push(`${i},${j}`);
+        if (!this._cellPiece(i, j, 'roof')) leak = true;
+        for (const [a, b, sd] of this._cellEdges(i, j)) {
+          const e = this.slots.get(`edge:${a},${b},${sd}`);
+          if (e) { if (e.type === 'door') door = true; continue; }
+          const [[c1, d1], [c2, d2]] = this._edgeCells(a, b, sd);
+          const [ni, nj] = c1 === i && d1 === j ? [c2, d2] : [c1, d1];
+          if (!this._cellPiece(ni, nj, 'cell')) { leak = true; continue; }
+          const k = `${ni},${nj}`; if (!seen.has(k)) { seen.add(k); stack.push([ni, nj]); }
+        }
+      }
+      if (!leak && door) for (const k of comp) out.add(k);
+    }
+    this._enclosed = out; this._encDirty = false;
+    return out;
+  }
+  inShelter(pos) { return this.enclosedCells().has(`${Math.round(pos.x / G)},${Math.round(pos.z / G)}`); }
+  find(type) { return this.pieces.find((p) => p.type === type) || null; }
   summary() {
     if (!this.pieces.length) return 'none';
     return Object.entries(this.counts()).map(([k, n]) => `${PIECES[k].name.toLowerCase()} x${n}`).join(', ');

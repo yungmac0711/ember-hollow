@@ -1,4 +1,6 @@
-// Ember Hollow — bootstrap + game loop (M0 + M1 chunk A: gathering + building). Wires world, entities, fire, companion and UI together.
+// Ember Hollow — bootstrap + game loop (M0 + M1 chunks A/B). Wires world, entities, fire, companion and UI together.
+// Chunk B: save/load, title screen, Biscuit v2 (pet/bark/fetch/dig/zoomies), Wren's reply bank, ambient
+// lines from story data, requests, lore notes + journal, decor and keepsakes.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Cave } from './world/cave.js';
@@ -18,7 +20,13 @@ import { ChatUI } from './companion/chat-ui.js';
 import { AmbientLines } from './companion/ambient.js';
 import { fireLevelWord, fogWord } from './companion/context.js';
 import { BuildSystem, loadPieceParts } from './build/shelter.js';
-import { PIECES, PIECE_ORDER } from './build/pieces.js';
+import { PIECES } from './build/pieces.js';
+import { STORY } from './data/story.js';
+import { weighted } from './companion/when.js';
+import { Requests } from './companion/requests.js';
+import { LoreNotes, ParchmentReader } from './world/lore.js';
+import { readSave, writeSave, newGameReload, consumeNewGameFlag } from './save/save.js';
+import { onTap } from './ui/tap.js';
 import { Harvest } from './entities/harvest.js';
 import { Colliders } from './world/colliders.js';
 import { InventoryUI, HOTBAR } from './ui/inventory-ui.js';
@@ -117,6 +125,8 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
+  const [loreNoteP, loreJournalP, loreSlateP, loreHookP] = await Promise.all([
+    loadParts('loreNote', raw), loadParts('loreJournal', raw), loadParts('loreSlate', raw), loadParts('loreHook', raw)]);
 
   const decor = buildDecor(scene, cave, seed, { boulder: decorBoulder, pillar: decorPillar, skipCrystals: crystalParts.length > 0 });
   const dressing = buildDressing(scene, cave, seed, {
@@ -143,11 +153,19 @@ async function init() {
   const hoodUp = wrenHood?.root.getObjectByName('hood_up') || null;
   const wrenModel = wrenScene ? { ...wrenScene, hoodUp } : { root: buildWrenPrimitive().root, animations: [] };
   const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
+  // companions steer around placed pieces and stand on floors (Chunk B)
+  puppy.colliders = colliders; wren.colliders = colliders;
+  puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
+  const lore = new LoreNotes(scene, cave, seed, { note: loreNoteP, journal: loreJournalP, slate: loreSlateP, hook: loreHookP });
+  const reader = new ParchmentReader(document.getElementById('reader'));
+  const requests = new Requests();
+  const keepsakesFound = new Set();
+  let dayCount = 1, shelterComplete = false;
 
   // ------------------------------------------------------------ companion brain
   const adapter = createAdapter(CONFIG.llm);
   const memory = new CompanionMemory(adapter);
-  const ambient = new AmbientLines({ globalGap: 45, perTrigger: 180 });
+  const ambient = new AmbientLines({ getState: () => gameState() });
   const recentFinds = [];
   let currentArea = lanternmouth;
   let clock = 0; // night cycle seconds
@@ -163,6 +181,25 @@ async function init() {
   }
   const fogState = () => (fogK >= 0.4 ? 'thin' : fogK > 0.02 ? 'thickening' : 'thick');
 
+  /** State keys for the writer's `when` filters (story/DATA_FORMATS.md). */
+  function worldState() {
+    const { level, lit } = nearestFireLevel();
+    const inShelter = build.inShelter(player.pos);
+    const sel = invUI?.selected;
+    return {
+      fire: !lit ? 'out' : level < 25 ? 'low' : level > 75 ? 'roaring' : 'lit',
+      time: 'day',                // no day/night yet (M1 later chunk)
+      area: inShelter ? 'shelter' : currentArea?.id ?? null,
+      inShelter,
+      weather: 'clear',           // no weather yet
+      warmth: 'ok',               // no warmth system yet
+      inventory: { ...player.inventory },
+      biscuit: puppy.mood,
+      dayCount,
+      fog: fogState(),
+      holding: sel && player.inventory[sel] > 0 ? sel : null,
+    };
+  }
   function gameState() {
     const { level, lit } = nearestFireLevel();
     const counts = {};
@@ -179,12 +216,16 @@ async function init() {
       fog: fogState(),
       playerName: CONFIG.playerName,
       inventory: { ...player.inventory },
+      areaName: currentArea ? currentArea.name : 'the Hollow',
+      dayCount,
+      world: worldState(),
     };
   }
+  const foundTrigger = (kind) => (kind === 'crystal_shard' ? 'found_crystal' : kind === 'glowcap' ? 'found_mushroom' : `found_${kind}`);
 
   const chat = new ChatUI({
     adapter, memory, getState: gameState,
-    onOpen: () => { input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); },
+    onOpen: () => { input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); setTimeout(talkRequests, 250); },
     onClose: () => { input.enabled = true; },
   });
   ambient.onLine = (trigger, line) => { hud.say(line); chat.addAmbient(line); };
@@ -192,6 +233,14 @@ async function init() {
   // ------------------------------------------------------------ hotbar, pack, chest
   const invUI = new InventoryUI({
     onSelectPiece: (t) => { build.select(t); hud.setRemoveActive(false); invUI.setPalette(t, player.inventory); },
+    onStick: () => throwStick(),
+    onReadNote: (id) => openNote(id),
+    isAvailable: (t, inv) => {
+      const P = PIECES[t];
+      if (P.decor || P.keepsake) return (inv[t] || 0) > 0;
+      if (P.locked) return requests.unlocked.has(t);
+      return true;
+    },
     onStore: (k) => moveItems(player.inventory, invUI.chestData?.store, k),
     onTake: (k) => moveItems(invUI.chestData?.store, player.inventory, k),
     onPanel: (open, was, data) => {
@@ -209,6 +258,151 @@ async function init() {
     build.setChestOpen(p, true); audio.blip(300);
     invUI.open('chest', { piece: p, store: p.store, inv: player.inventory });
   }
+
+  // ------------------------------------------------------------ Biscuit: fetch, dig, barks
+  const woofEl = document.getElementById('woof');
+  let woofT = 0;
+  puppy.onBark = () => { woofT = 1.3; woofEl.classList.add('show'); audio.bark?.(); };
+  function throwStick() {
+    if (!running || paused) return;
+    const st = puppy.stick;
+    if (st.state !== 'hand') { hud.toast(`${CONFIG.puppy.name} still has the stick`, 1.2); return; }
+    const from = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(player.forward, 0.5);
+    from.y -= 0.25;
+    if (st.throw(from, player.forward)) { audio.blip(500); hud.toast(`Fetch, ${CONFIG.puppy.name}!`, 1.2); }
+  }
+  const digLog = [];
+  puppy.onDig = () => {
+    const inv = player.inventory, area = currentArea?.id;
+    const finds = (STORY.biscuitFinds.finds || []).filter((f) => !f.areas || f.areas.includes(area));
+    if (!finds.length) return;
+    const f = weighted(finds);
+    digLog.push(f.id);
+    if (f.givesItem) {
+      inv[f.givesItem.item] = (inv[f.givesItem.item] || 0) + (f.givesItem.count || 1);
+      hud.toast(`🐾 ${CONFIG.puppy.name} dug up ${f.name}! +${f.givesItem.count || 1} ${ITEM_INFO[f.givesItem.item]?.label || f.givesItem.item}`, 3);
+    } else if (f.keepsake) {
+      inv[f.id] = (inv[f.id] || 0) + 1; keepsakesFound.add(f.id);
+      hud.toast(`🐾 Keepsake: ${f.name}. ${f.flavor}${f.placeNote ? ' ' + f.placeNote : ''}`, 4.5);
+      memory.addFact('find', `Biscuit dug up a keepsake: ${f.name}`, f.rarity === 'rare' ? 3 : 1);
+    } else hud.toast(`🐾 ${CONFIG.puppy.name} dug up ${f.name}. ${f.flavor}`, 3.5);
+    audio.blip(760);
+    if (f.rarity === 'rare' && f.wrenLine?.length) ambient.sayNow(f.wrenLine[Math.floor(Math.random() * f.wrenLine.length)], 'biscuit_dig_find');
+    else ambient.trigger('biscuit_dig_find');
+  };
+
+  // ------------------------------------------------------------ requests
+  const rqEl = document.getElementById('request'), rqTitle = rqEl.querySelector('.rq-title'), rqNeeds = rqEl.querySelector('.rq-needs'), rqGive = document.getElementById('rq-give');
+  let rqHtml = '', offerCooldown = 0;
+  function talkRequests() {
+    const st = gameState(), inv = player.inventory;
+    if (requests.active) {
+      const pr = requests.progress(inv);
+      if (pr.ready) completeRequest(); else ambient.sayNow(requests.progressLine(st), 'request');
+    } else {
+      const line = requests.offer(st.world, st);
+      if (line) { ambient.sayNow(line, 'request'); audio.blip(640); }
+    }
+  }
+  function completeRequest() {
+    const res = requests.complete(player.inventory, gameState());
+    if (!res) return false;
+    ambient.sayNow(res.line, 'request');
+    const rw = res.reward, nm = PIECES[rw.id]?.name || ITEM_INFO[rw.id]?.label || rw.id;
+    hud.toast(rw.type === 'build_piece' ? `🔨 New build piece: ${nm}` : rw.type === 'decoration' ? `🎁 ${nm}: place it from 🔨` : `🎁 +${rw.count || 1} ${nm}`, 3.2);
+    audio.blip(880); audio.blip(1100);
+    memory.addFact('milestone', `Cam finished Wren's request: ${res.r.title}`, 2);
+    return true;
+  }
+  onTap(rqGive, () => completeRequest());
+  function updateRequests(dt) {
+    const inv = player.inventory, dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
+    // offer when Cam idles near Wren
+    offerCooldown -= dt;
+    if (!requests.active && offerCooldown <= 0 && dw < 4 && player.stillTime > 8 && !chat.open) {
+      offerCooldown = 60; const st = gameState(); const line = requests.offer(st.world, st);
+      if (line) ambient.sayNow(line, 'request');
+    }
+    const pr = requests.progress(inv);
+    let html = '';
+    if (pr) html = pr.rows.map((r) => `<span class="${r.have >= r.need ? 'ok' : ''}">${ITEM_INFO[r.item]?.label || r.item} ${r.have}/${r.need}</span>`).join(' · ');
+    rqEl.classList.toggle('hidden', !pr);
+    if (pr && html !== rqHtml) { rqTitle.textContent = `Wren: ${pr.r.title}`; rqNeeds.innerHTML = html; rqHtml = html; }
+    rqGive.classList.toggle('hidden', !(pr?.ready && dw < 4));
+  }
+
+  // ------------------------------------------------------------ lore notes
+  function openNote(id) {
+    const n = lore.get(id); if (!n) return;
+    invUI.close(true); invUI.onPanel?.(null);
+    reader.show(n);
+    input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock();
+    if (lore.markRead(id)) {
+      invUI.setJournal(lore.journal()); hud.toast('📜 Added to your journal (🎒)', 2);
+      memory.addFact('find', `Cam read a note: ${n.title}`, 1);
+    }
+    audio.blip(420);
+  }
+  reader.onClose = () => { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches && running) input.requestPointerLock(); };
+
+  // ------------------------------------------------------------ save / load
+  let titleFire = null;
+  function snapshot() {
+    const P = player.pos;
+    return {
+      player: { x: +P.x.toFixed(3), y: +P.y.toFixed(3), z: +P.z.toFixed(3), yaw: +player.yaw.toFixed(4) },
+      inventory: { ...player.inventory },
+      pieces: build.serialize(),
+      hearths: build.pieces.filter((p) => p.fire).map((p) => ({ id: p.id, fuel: +p.fire.fuel.toFixed(1) })),
+      fires: fires.fires.filter((f) => !f.hearth && f !== titleFire).map((f) => ({ x: +f.pos.x.toFixed(3), y: +f.pos.y.toFixed(3), z: +f.pos.z.toFixed(3), fuel: +f.fuel.toFixed(1) })),
+      requests: requests.serialize(),
+      notes: [...lore.read],
+      keepsakesFound: [...keepsakesFound],
+      dayCount, clock: Math.round(clock), shelterComplete,
+    };
+  }
+  function applySave(d) {
+    const inv = player.inventory;
+    for (const k of Object.keys(inv)) inv[k] = 0;
+    Object.assign(inv, d.inventory || {});
+    build.clearAll();
+    build.restore(d.pieces || []);
+    for (const h of d.hearths || []) { const p = build.pieces.find((q) => q.id === h.id); if (p?.fire) p.fire.fuel = h.fuel || 0; }
+    for (const f of d.fires || []) fires.build(new THREE.Vector3(f.x, f.y, f.z), 0).fuel = f.fuel || 0;
+    if (d.player) {
+      player.pos.set(d.player.x, d.player.y, d.player.z); player.yaw = d.player.yaw || 0;
+      wren.pos.copy(player.pos).add(new THREE.Vector3(1.4, 0, 1)); cave.resolve(wren.pos, 0.6); colliders.resolve(wren.pos, 0.35);
+      puppy.pos.copy(player.pos).add(new THREE.Vector3(-1.1, 0, 0.9)); cave.resolve(puppy.pos, 0.55); colliders.resolve(puppy.pos, 0.3);
+    }
+    requests.restore(d.requests);
+    lore.read = new Set(d.notes || []); invUI.setJournal(lore.journal());
+    for (const k of d.keepsakesFound || []) keepsakesFound.add(k);
+    dayCount = d.dayCount || 1; clock = d.clock || 0; shelterComplete = !!d.shelterComplete;
+    currentArea = cave.chamberAt(player.pos.x, player.pos.z) || currentArea;
+  }
+  let lastSaveAt = 0;
+  function saveNow(why = 'auto') {
+    if (!started) return false;
+    const ok = writeSave(snapshot());
+    if (ok) { lastSaveAt = performance.now(); game.lastSave = { why, at: Date.now() }; }
+    return ok;
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow('hidden'); });
+  window.addEventListener('pagehide', () => saveNow('pagehide'));
+
+  // ------------------------------------------------------------ pause menu
+  let paused = false;
+  const pauseEl = document.getElementById('pause'), pauseNote = document.getElementById('pause-note');
+  function setPaused(on) {
+    if (!running) return;
+    paused = on; pauseEl.classList.toggle('hidden', !on);
+    if (on) { input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); pauseNote.textContent = game.lastSave ? `Last saved ${new Date(game.lastSave.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''; }
+    else { input.enabled = true; if (!matchMedia('(pointer: coarse)').matches) input.requestPointerLock(); }
+  }
+  onTap(document.getElementById('btn-pause'), () => setPaused(!paused));
+  onTap(document.getElementById('pause-resume'), () => setPaused(false));
+  onTap(document.getElementById('pause-close'), () => setPaused(false));
+  onTap(document.getElementById('pause-save'), () => { pauseNote.textContent = saveNow('manual') ? 'Game saved ✓' : 'Could not save (storage full or private mode)'; audio.blip(700); });
 
   // ------------------------------------------------------------ session end → memory summary
   let lastActivity = performance.now(), sessionOpen = true;
@@ -229,7 +423,8 @@ async function init() {
   let ctxAction = null;
   let lastFogWord = 'thick';
   const fireWatch = new Map(); // fire -> {wasLit, wasLow}
-  let proxCheck = 0;
+  let proxCheck = 0, poiCheck = 0, lastItemBark = -1e9;
+  const visited = new Set(['lanternmouth']), barked = new Set(), barkedItems = new WeakSet();
   const seenMushroom = { at: -1e9 }, seenCrystal = { at: -1e9 };
 
   function canBuildFireHere() {
@@ -249,6 +444,8 @@ async function init() {
     }
     const it = items.findTarget(player.pos, fwd);
     if (it) return { label: `Pick up ${ITEM_INFO[it.kind].label}`, kind: 'pick', it };
+    const note = lore.findTarget(player.pos, fwd);
+    if (note) return { label: lore.read.has(note.id) ? 'Read again' : 'Read note', kind: 'read', note };
     let node = harvest.findTarget(player.pos, fwd);
     const bp = build.findInteractable(player.pos, fwd);
     if (node && bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z)) node = null; // nearer one wins
@@ -259,6 +456,7 @@ async function init() {
     const dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
     const db = Math.hypot(puppy.pos.x - player.pos.x, puppy.pos.z - player.pos.z);
     if (db < 1.8) return { label: `Pet ${CONFIG.puppy.name}`, kind: 'pet' };
+    if (invUI.selected === 'stew' && inv.stew > 0) return { label: 'Eat stew', kind: 'eat' };
     if (inv.wood >= FC.woodToBuild && inv.flint >= FC.flintToBuild) {
       const spot = canBuildFireHere();
       if (spot) return { label: 'Light fire', kind: 'fire', spot };
@@ -278,7 +476,7 @@ async function init() {
         items.pickUp(a.it); inv[a.it.kind]++; audio.blip(a.it.kind === 'flint' ? 880 : 620);
         recentFinds.push(a.it.kind === 'wood' ? 'wood' : a.it.kind); if (recentFinds.length > 5) recentFinds.shift();
         hud.toast(`+1 ${ITEM_INFO[a.it.kind].label}`, 1.2);
-        ambient.trigger(`found_${a.it.kind}`);
+        ambient.trigger(foundTrigger(a.it.kind));
         if (a.it.kind === 'flint') memory.addFact('find', `Cam found flint for the first time`, 2);
         break;
       }
@@ -298,6 +496,8 @@ async function init() {
         break;
       }
       case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); break;
+      case 'read': openNote(a.note.id); break;
+      case 'eat': inv.stew--; hud.toast('Warm glowcap stew. Toes thawing.', 2); audio.blip(520); ambient.trigger('stew_eaten'); break;
       case 'talk': chat.show(); break;
       case 'harvest': break; // hold-driven, see updateHold()
       case 'door': { const open = build.toggleDoor(a.piece); audio.blip(open ? 240 : 200); break; }
@@ -307,7 +507,11 @@ async function init() {
         if (r.ok) {
           const name = PIECES[r.piece.type].name;
           hud.toast(`${name} placed`, 1.2); audio.blip(360);
-          ambient.trigger('shelter_built');
+          if (!shelterComplete && build.enclosedCells().size) {
+            shelterComplete = true; ambient.trigger('shelter_complete', { force: true });
+            memory.addFact('milestone', 'Cam finished a real shelter: floor, walls, roof and a door', 3);
+            hud.toast('🏠 Shelter complete!', 2.6);
+          } else ambient.trigger('build_piece_placed');
           if (build.pieces.length === 1) memory.addFact('milestone', 'Cam started building a shelter', 3);
           if (r.piece.type === 'hearth') hud.toast('Hearth built. Add wood to light it', 2.4);
         } else hud.toast(r.why, 1.8);
@@ -351,7 +555,7 @@ async function init() {
       audio.blip(node.type === 'tree' ? 520 : 700);
       const kind = node.type === 'tree' ? 'wood' : 'stone';
       recentFinds.push(kind); if (recentFinds.length > 5) recentFinds.shift();
-      ambient.trigger(`found_${kind}`);
+      ambient.trigger(foundTrigger(kind));
       if (got.flint) ambient.trigger('found_flint');
       hold = null;
       invUI.setRing(null);
@@ -360,6 +564,8 @@ async function init() {
 
   function handleTaps() {
     for (const t of input.taps) {
+      const nt = !build.active && lore.pickScreen(t.x, t.y, camera, player.pos);
+      if (nt) { openNote(nt.id); continue; }
       const bp = build.pickScreen(t.x, t.y, camera, player.pos);
       if (bp && !build.active) {
         if (bp.type === 'door') { const open = build.toggleDoor(bp); audio.blip(open ? 240 : 200); }
@@ -385,6 +591,7 @@ async function init() {
         memory.addFact('milestone', `Cam explored ${area.name}`, 2);
       }
       if (area !== lanternmouth) ambient.trigger('new_area');
+      if (!visited.has(area.id)) { visited.add(area.id); if (area !== lanternmouth) puppy.bark('area'); }
     }
     if (area) currentArea = area; else if (currentArea && cave.field(player.pos.x, player.pos.z) < 2.6) currentArea = null;
 
@@ -413,10 +620,26 @@ async function init() {
     clock += dt;
     const after = timeOfNight();
     if (before !== after && (after === 'deep night' || after === 'quiet hour')) ambient.trigger('night_deepens');
-    if (Math.floor((clock - dt) / CYCLE) !== Math.floor(clock / CYCLE)) ambient.trigger('morning');
+    if (Math.floor((clock - dt) / CYCLE) !== Math.floor(clock / CYCLE)) { dayCount++; ambient.trigger('morning'); }
     // idle + Biscuit
     if (player.stillTime > 40) ambient.trigger('idle');
-    while (puppy.events.length) { puppy.events.shift(); ambient.trigger('biscuit'); }
+    while (puppy.events.length) {
+      const ev = puppy.events.shift();
+      ambient.trigger(ev === 'petted' ? 'pet_biscuit' : ev === 'fetch' ? 'biscuit_fetch' : 'biscuit');
+    }
+    // Biscuit barks at points of interest: unread notes, interesting pickups (new areas: above)
+    if ((poiCheck -= dt) <= 0) {
+      poiCheck = 1;
+      const n = lore.nearestUnread(puppy.pos, 5);
+      if (n && !barked.has(n.id) && puppy.bark('note', n.pos)) barked.add(n.id);
+      const it = items.nearest(puppy.pos, 4);
+      if (it && !barkedItems.has(it) && ['flint', 'glowcap', 'crystal_shard'].includes(it.kind) && game.time - lastItemBark > 25 && puppy.bark('pickup', it.pos)) { barkedItems.add(it); lastItemBark = game.time; }
+      const bed = build.find('biscuit_bed');
+      puppy.bed = bed?.sleepPoint || null;
+      // wind chime: a soft tinkle now and then when Cam is near one
+      const ch = build.find('crystal_wind_chime');
+      if (ch && Math.hypot(ch.x - player.pos.x, ch.z - player.pos.z) < 5 && Math.random() < 0.12) audio.chime(0.8);
+    }
     // 10 minutes idle ends the session
     if (sessionOpen && performance.now() - lastActivity > 10 * 60 * 1000) endSession('idle');
   }
@@ -439,6 +662,8 @@ async function init() {
   function updateHint() {
     const inv = player.inventory;
     invUI.setInventory(inv);
+    if (build.active && !invUI.isAvailable(build.selected, inv)) build.select('floor');
+    invUI.setStickOut(puppy.stick.state !== 'hand');
     if (build.active) {
       hud.setHint(build.removeMode ? 'Remove mode: aim at a piece, then Use for a full refund. 🗑 to go back.'
         : `${PIECES[build.selected].name}: ${build.costText()}. ⟳ rotate · 🗑 remove · 🔨 done`);
@@ -461,7 +686,12 @@ async function init() {
     if (document.hidden) return;
     game.time += dt;
     input.update();
+    if (running && input.consume('pause')) setPaused(!paused);
+    if (running && paused) {
+      input.clearFrame(); hud.update(dt, renderer); renderer.render(scene, camera); return;
+    }
     if (running) {
+      if (input.consume('stick')) throwStick();
       if (input.consume('chat')) chat.toggle();
       if (input.consume('build')) {
         const on = build.toggle(); hud.setBuildActive(on); hud.setRemoveActive(false);
@@ -474,7 +704,8 @@ async function init() {
         if (input.consume('remove')) hud.setRemoveActive(build.setRemove());
       } else { input.consume('rotate'); input.consume('remove'); }
       for (let n = 1; n <= 10; n++) if (input.consume('slot' + n)) {
-        if (build.active) { build.select(PIECE_ORDER[n - 1]); hud.setRemoveActive(false); } else if (HOTBAR[n - 1]) invUI.select(HOTBAR[n - 1]);
+        const vis = invUI.visiblePieces(player.inventory);
+        if (build.active) { if (vis[n - 1]) { build.select(vis[n - 1]); hud.setRemoveActive(false); } } else if (HOTBAR[n - 1]) invUI.select(HOTBAR[n - 1]);
       }
       handleTaps();
       player.update(dt, input);
@@ -486,16 +717,36 @@ async function init() {
       items.update(dt, ctxAction?.kind === 'pick' ? ctxAction.it : null, player.pos);
       harvest.update(dt, player.pos);
       updateTriggers(dt);
+      updateRequests(dt);
       ambient.update(dt);
+      if (performance.now() - lastSaveAt > 30000) saveNow('auto');
     } else {
-      player.update(0, input);
+      // title backdrop: slow orbit around the fire by the camp
       build.update(player, dt);
+      const f = titleFire || fires.nearest(player.pos, 20) || { pos: player.pos };
+      const a = game.time * 0.06 + 0.8, R0 = 5.2;
+      camera.position.set(f.pos.x + Math.cos(a) * R0, f.pos.y + 2.1, f.pos.z + Math.sin(a) * R0);
+      cave.resolve(camera.position, 0.8);
+      camera.lookAt(f.pos.x, f.pos.y + 1.5, f.pos.z); // fire sits low in frame, under the menu
+    }
+    if (woofT > 0) {
+      woofT -= dt;
+      _camPos.set(puppy.pos.x, puppy.pos.y + 0.75, puppy.pos.z).project(camera);
+      woofEl.style.left = `${((_camPos.x + 1) / 2 * window.innerWidth).toFixed(0)}px`;
+      woofEl.style.top = `${((1 - _camPos.y) / 2 * window.innerHeight).toFixed(0)}px`;
+      if (woofT <= 0 || _camPos.z > 1) woofEl.classList.remove('show');
     }
     fires.update(dt);
     const anyLit = fires.anyLit;
     ambientLight.update(dt, player.pos, fires); // §8.1 distance-driven ambient
     puppy.update(dt, player, fires);
-    wren.update(dt, player, fires, chat.open, { fog: fogState() });
+    wren.update(dt, player, fires, chat.open, {
+      fog: fogState(), items: running ? items : null,
+      onGather: (it) => {
+        items.pickUp(it); player.inventory[it.kind] = (player.inventory[it.kind] || 0) + 1;
+        hud.toast(`Wren hands you ${ITEM_INFO[it.kind].label}`, 1.8); audio.blip(600);
+      },
+    });
     decor.update(dt);
     dressing.update(dt, { anyFireLit: anyLit });
     budget.update(dt, camera.getWorldPosition(_camPos));
@@ -506,27 +757,57 @@ async function init() {
     renderer.render(scene, camera);
   }
 
-  Object.assign(game, { THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, ready: true,
+  Object.assign(game, { THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+    audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
+    get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });
 
-  // ------------------------------------------------------------ start screen
+  // ------------------------------------------------------------ title screen (ui_text.json)
   const startEl = document.getElementById('start');
-  function begin() {
+  const UI = STORY.uiText;
+  document.getElementById('title-name').textContent = UI.title;
+  document.getElementById('title-tagline').textContent = UI.tagline;
+  document.getElementById('title-sub').textContent = UI.subtitle;
+  document.getElementById('title-tip').textContent = UI.loadingTips[Math.floor(Math.random() * UI.loadingTips.length)];
+  const menuEl = document.getElementById('title-menu'), confirmEl = document.getElementById('title-confirm');
+  const contBtn = document.getElementById('title-continue'), newBtn = document.getElementById('title-new'), setBtn = document.getElementById('title-settings');
+  contBtn.textContent = UI.menu.continue; newBtn.textContent = UI.menu.newGame; setBtn.textContent = `${UI.menu.settings} (soon)`;
+  const fresh = consumeNewGameFlag();
+  const save = fresh ? null : readSave();
+  let started = false;
+  if (save) { try { applySave(save); } catch (e) { console.warn('[save] restore failed', e); } }
+  // a fire for the title backdrop if the camp has none nearby (removed when play starts)
+  if (!fires.nearest(player.pos, 14, true)) {
+    const p = new THREE.Vector3(lanternmouth.x - 0.6, 0, lanternmouth.z + 0.1);
+    p.y = cave.floorAt(p.x, p.z);
+    titleFire = fires.build(p, 6);
+  }
+  function begin(mode = save ? 'continue' : 'new') {
     if (running) return;
-    running = true;
-    startEl.classList.add('hidden');
-    audio.unlock();
+    running = true; started = true;
+    startEl.classList.add('hidden'); document.body.classList.remove('on-title');
+    audio.unlock(); // inside the tap: unlocks iOS audio
+    if (titleFire) { fires.remove(titleFire); titleFire = null; }
+    player.update(0, input);
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone;
     if (!isIOS && !standalone && matchMedia('(pointer: coarse)').matches && document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     }
     if (!matchMedia('(pointer: coarse)').matches) input.requestPointerLock();
-    hud.toast('Gather wood 🪵 and flint ✦ to light a fire', 3.5);
-    lastActivity = performance.now();
+    hud.toast(mode === 'continue' ? 'Welcome back to the Hollow' : 'Gather wood 🪵 and flint ✦ to light a fire', 3.5);
+    lastActivity = performance.now(); lastSaveAt = performance.now();
+    if (mode === 'new') saveNow('new');
   }
-  startMsg.textContent = 'Tap to begin';
-  startEl.addEventListener('pointerup', begin, { once: true });
+  startMsg.textContent = '';
+  document.body.classList.add('on-title');
+  menuEl.classList.remove('hidden');
+  contBtn.hidden = !save;
+  (save ? contBtn : newBtn).classList.add('primary');
+  onTap(contBtn, () => begin('continue'));
+  onTap(newBtn, () => { if (save) { menuEl.classList.add('hidden'); confirmEl.classList.remove('hidden'); } else begin('new'); });
+  onTap(document.getElementById('confirm-no'), () => { confirmEl.classList.add('hidden'); menuEl.classList.remove('hidden'); });
+  onTap(document.getElementById('confirm-yes'), () => newGameReload());
   requestAnimationFrame((t) => { last = t; frame(t); });
   if (CONFIG.debug.autostart) begin();
 }

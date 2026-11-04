@@ -3,7 +3,7 @@
 //   Biscuit > body > {leg_FL, leg_FR, leg_BL, leg_BR, tail, neck > {tag, head > {jaw, ear_L, ear_R}}}
 // Authored poses (stand / sit / playbow / curled, baked by tools/extract-biscuit-poses.mjs) are blended
 // by slerping node quaternions, then procedural layers go on top: walk cycle, tail carriage + wag,
-// ear flop, jaw pant, head tilt and breathing.
+// ear flop, jaw pant, head tilt and breathing; Chunk B adds a gallop (run) and a dig scrabble.
 import * as THREE from 'three';
 import { BISCUIT_POSES } from './biscuit-poses.js';
 
@@ -28,7 +28,7 @@ export class BiscuitRig {
       }
     }
     this.w = { sit: 0, playbow: 0, curled: 0 }; // stand = remainder
-    this.t = 0; this.walkPhase = 0; this.wagT = 0; this.tailX = -35 * D; this.pant = 0; this.earFlop = 0;
+    this.t = 0; this.walkPhase = 0; this.wagT = 0; this.tailX = -35 * D; this.pant = 0; this.earFlop = 0; this.dig = 0;
   }
 
   /**
@@ -66,14 +66,26 @@ export class BiscuitRig {
     // --- walk cycle (diagonal pairs: FL+BR, FR+BL), trot bounce, scaled by speed and standing weight
     const moving = Math.min(1, s.speed / 1.8) * standW;
     this.walkPhase += dt * (3 + s.speed * 3.4) * (s.speed > 0.08 ? 1 : 0);
-    const swing = moving * (s.speed > 4 ? 0.85 : 0.6);
+    // run cycle (Chunk B): above ~4 m/s the trot blends into a bounding gallop — front pair and
+    // rear pair nearly together (slightly staggered), bigger swing, body rocking nose-up/nose-down
+    const gallop = THREE.MathUtils.smoothstep(s.speed, 3.6, 5.4) * standW;
+    const swing = moving * (0.6 + 0.4 * gallop);
     const ph = this.walkPhase;
-    const legs = [['leg_FL', 0], ['leg_BR', 0], ['leg_FR', Math.PI], ['leg_BL', Math.PI]];
-    for (const [k, off] of legs) {
-      _q.setFromAxisAngle(_v.set(1, 0, 0), Math.sin(ph + off) * swing);
+    const trot = { leg_FL: 0, leg_BR: 0, leg_FR: Math.PI, leg_BL: Math.PI };
+    const bound = { leg_FL: 0, leg_FR: 0.5, leg_BL: Math.PI, leg_BR: Math.PI + 0.5 };
+    for (const k of ['leg_FL', 'leg_FR', 'leg_BL', 'leg_BR']) {
+      const a = Math.sin(ph + trot[k]) * (1 - gallop) + Math.sin(ph + bound[k]) * gallop;
+      _q.setFromAxisAngle(_v.set(1, 0, 0), a * swing);
       n[k].quaternion.multiply(_q);
     }
-    n.body.position.y += Math.abs(Math.sin(ph)) * 0.025 * moving - 0.012 * moving;
+    if (gallop > 0.01) { _q.setFromAxisAngle(_v.set(1, 0, 0), Math.sin(ph + 1.2) * 0.12 * gallop); n.body.quaternion.multiply(_q); }
+    // digging: front paws scrabble fast (layered on the play-bow pose)
+    this.dig += ((s.dig || 0) - this.dig) * Math.min(1, dt * 8);
+    if (this.dig > 0.01) {
+      n.leg_FL.quaternion.multiply(_q.setFromAxisAngle(_v.set(1, 0, 0), Math.sin(this.t * 19) * 0.7 * this.dig));
+      n.leg_FR.quaternion.multiply(_q.setFromAxisAngle(_v.set(1, 0, 0), Math.sin(this.t * 19 + Math.PI) * 0.7 * this.dig));
+    }
+    n.body.position.y += Math.abs(Math.sin(ph)) * (0.025 + 0.03 * gallop) * moving - 0.012 * moving;
     _q.setFromAxisAngle(_v.set(0, 0, 1), Math.sin(ph) * 0.05 * moving); n.body.quaternion.multiply(_q);
     // breathing (slower + deeper when curled asleep)
     const br = Math.sin(this.t * (this.w.curled > 0.5 ? 1.6 : 3.2));

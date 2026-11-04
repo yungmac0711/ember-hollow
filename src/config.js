@@ -62,9 +62,9 @@ export const CONFIG = {
   },
   items: {
     wood: 30, stone: 16, flint: 10,          // M0 loose pickups
-    mushroom: 12, glowcap: 14, shard: 10,    // M1 cave forage
+    mushroom: 12, glowcap: 14, crystal_shard: 10,    // M1 cave forage
     // seconds until a picked item regrows (only while the player is > 7 m away, so nothing pops in)
-    respawn: { wood: 300, stone: 300, flint: 360, mushroom: 180, glowcap: 240, shard: 420 },
+    respawn: { wood: 300, stone: 300, flint: 360, mushroom: 180, glowcap: 240, crystal_shard: 420 },
   },
   // Hold-to-gather nodes (tap-hold the target or hold Use). Root trees → wood, cave rocks → stone.
   harvest: {
@@ -82,11 +82,12 @@ export const CONFIG = {
     historyTurns: 8,
   },
   puppy: { name: 'Biscuit' },
-  // LLM provider for companion chat. 'stub' = canned offline replies (default, no network).
+  // LLM provider for companion chat. 'bank' = Wren's offline reply bank from story/wren_replies.json (default, no network);
+  // 'stub' = the old M0 canned replies (fallback).
   // 'http' = OpenAI-compatible chat endpoint (see src/companion/llm/http-adapter.js).
   // NEVER put an API key in this file — point `endpoint` at your own small proxy that holds the key.
   llm: {
-    provider: params.get('llm') || 'stub',
+    provider: params.get('llm') || 'bank',
     http: {
       endpoint: '',  // e.g. 'https://your-proxy.example.com/v1/chat/completions'
       model: '',
@@ -120,6 +121,23 @@ export const CONFIG = {
       lanternPiece: 'assets/models/build/lantern_double.glb',
       chestPiece: 'assets/models/props/chest.glb',
       bedrollPiece: 'assets/models/props/bedroll.glb',
+      // Chunk B: request rewards, decorations, keepsakes (art/assets/build, decor, keepsakes) and lore props
+      benchPiece: 'assets/models/build/lakeside_bench.glb',
+      herbBundle: 'assets/models/decor/herb_bundle.glb',
+      wovenRug: 'assets/models/decor/woven_rug.glb',
+      biscuitBed: 'assets/models/decor/biscuit_bed.glb',
+      windChime: 'assets/models/decor/crystal_wind_chime.glb',
+      ks_brass_button: 'assets/models/keepsakes/brass_button.glb',
+      ks_blue_marble: 'assets/models/keepsakes/blue_marble.glb',
+      ks_tin_whistle: 'assets/models/keepsakes/tin_whistle.glb',
+      ks_feather_owl: 'assets/models/keepsakes/feather_owl.glb',
+      ks_waylamp_key: 'assets/models/keepsakes/waylamp_key.glb',
+      ks_keeper_charm: 'assets/models/keepsakes/keeper_charm.glb',
+      ks_tiny_lantern: 'assets/models/keepsakes/tiny_lantern.glb',
+      loreNote: 'assets/models/lore/note_paper.glb',
+      loreJournal: 'assets/models/lore/journal_page.glb',
+      loreSlate: 'assets/models/lore/note_slate.glb',
+      loreHook: 'assets/models/lore/waylamp_hook.glb',
       // M1 gathering
       rockB: 'assets/models/cave-rock/rock-b.glb',
       mushroomRed: 'assets/models/nature/mushroom_red.glb',

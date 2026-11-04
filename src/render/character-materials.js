@@ -115,3 +115,60 @@ export function liftCharacter(root) {
     o.material = Array.isArray(o.material) ? o.material.map(characterMaterial) : characterMaterial(o.material);
   });
 }
+
+const HIDDEN = new THREE.MeshBasicMaterial({ visible: false });
+const _inv = new THREE.Matrix4(), _m = new THREE.Matrix4();
+/**
+ * Draw-call saver #2 (Chunk B, low-tier budget): fold every lifted, flat-coloured part of a
+ * procedurally animated character into ONE SkinnedMesh per material side. Each original part mesh
+ * becomes its own bone (rigid weight 1), so the existing rig / animator code keeps rotating the same
+ * nodes and nothing else changes. Originals keep their transforms, children and raycast hit area but
+ * stop drawing (invisible material). Glowing / transparent parts, and anything under `skip(node)`
+ * (Wren's hood swap, which toggles visibility), stay separate. Wren 9 → 3, Biscuit 13 → 2 calls.
+ */
+export function skinCharacter(root, skip = () => false) {
+  if (/[?&]noskin=1/.test(globalThis.location?.search || "")) return [];
+  root.updateMatrixWorld(true);
+  _inv.copy(root.matrixWorld).invert();
+  const bySide = new Map();
+  root.traverse((o) => {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || Array.isArray(o.material)) return;
+    const m = o.material;
+    if (!m || m.visible === false || !m.name?.startsWith('character:') || m.map || (m.transparent && m.opacity < 1)) return;
+    for (let a = o; a && a !== root; a = a.parent) if (skip(a)) return;
+    if (!bySide.has(m.side)) bySide.set(m.side, []);
+    bySide.get(m.side).push(o);
+  });
+  const made = [];
+  for (const [side, list] of bySide) {
+    if (list.length < 2) continue;
+    const geos = list.map((o, bi) => {
+      const src = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      const n = src.attributes.position.count, g = new THREE.BufferGeometry();
+      g.setAttribute('position', src.attributes.position.clone());
+      if (src.attributes.normal) g.setAttribute('normal', src.attributes.normal.clone()); else g.computeVertexNormals();
+      const c = o.material.color || new THREE.Color(1, 1, 1), vc = o.material.vertexColors && src.attributes.color;
+      const col = new Float32Array(n * 3), sI = new Uint16Array(n * 4), sW = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = c.r * (vc ? vc.getX(i) : 1); col[i * 3 + 1] = c.g * (vc ? vc.getY(i) : 1); col[i * 3 + 2] = c.b * (vc ? vc.getZ(i) : 1);
+        sI[i * 4] = bi; sW[i * 4] = 1;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(sI, 4));
+      g.setAttribute('skinWeight', new THREE.BufferAttribute(sW, 4));
+      g.applyMatrix4(_m.multiplyMatrices(_inv, o.matrixWorld));
+      src.dispose();
+      return g;
+    });
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    const sm = new THREE.SkinnedMesh(merged, characterMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side })));
+    sm.name = 'character:skinned'; sm.frustumCulled = false;
+    root.add(sm); root.updateMatrixWorld(true);
+    sm.bind(new THREE.Skeleton(list), sm.matrixWorld);
+    for (const o of list) o.material = HIDDEN;
+    made.push(sm);
+  }
+  return made;
+}

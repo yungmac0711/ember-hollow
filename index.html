@@ -38,7 +38,11 @@
     <div id="subtitle"><span class="who">Wren</span><span class="line"></span></div>
     <div id="fuel" class="hidden"><div class="label">Campfire</div><div class="bar"><div class="fill"></div></div></div>
     <div id="crosshair"></div>
+    <div id="tip"></div>
+    <div id="woof">woof!</div>
+    <div id="request" class="hidden"><div class="rq-title"></div><div class="rq-needs"></div><button class="rq-give hidden" id="rq-give">Give to Wren</button></div>
     <div id="fps" class="hidden"></div>
+    <button id="btn-pause" aria-label="Pause">⏸</button>
 
     <div id="joystick" class="hidden"><div class="knob"></div></div>
     <div id="ring" class="hidden"><div class="fill"></div><span class="ico"></span></div>
@@ -70,6 +74,23 @@
     </div>
   </div>
 
+  <div id="pause" class="panel hidden" role="dialog" aria-label="Paused">
+    <div class="panel-head"><span>Paused</span><button class="panel-close" id="pause-close" aria-label="Close">✕</button></div>
+    <div class="panel-body pause-body">
+      <button class="tbtn" id="pause-resume">Resume</button>
+      <button class="tbtn" id="pause-save">Save game</button>
+      <p class="pause-note" id="pause-note"></p>
+    </div>
+  </div>
+
+  <div id="reader" class="hidden" role="dialog" aria-label="Note">
+    <div class="parchment">
+      <button class="pr-close" aria-label="Close">✕</button>
+      <h2 class="pr-title"></h2>
+      <div class="pr-text"></div>
+    </div>
+  </div>
+
   <div id="chat" class="hidden" role="dialog" aria-label="Chat">
     <div class="chat-head"><span class="chat-name">Companion</span><button id="chat-close" aria-label="Close">✕</button></div>
     <div class="chat-log" id="chat-log"></div>
@@ -81,14 +102,25 @@
 
   <div id="start">
     <div class="start-inner">
-      <div class="logo">🔥</div>
-      <h1>Ember Hollow</h1>
-      <p class="sub">a cozy cave in the dark</p>
+      <h1 id="title-name">Ember Hollow</h1>
+      <p class="tagline" id="title-tagline">Light a fire. Find your way home.</p>
+      <p class="sub" id="title-sub"></p>
+      <div class="title-menu hidden" id="title-menu">
+        <button class="tbtn" id="title-continue" hidden></button>
+        <button class="tbtn" id="title-new"></button>
+        <button class="tbtn dim" id="title-settings" disabled></button>
+      </div>
+      <div class="title-confirm hidden" id="title-confirm">
+        <p>Start a new game? Your current save will be replaced. (Wren will still remember you.)</p>
+        <button class="tbtn" id="confirm-yes">Start fresh</button>
+        <button class="tbtn dim" id="confirm-no">Keep my save</button>
+      </div>
       <p id="start-msg">Loading…</p>
+      <p class="tip" id="title-tip"></p>
       <div class="controls-help">
-        <div><b>Touch:</b> left thumb moves · drag right side to look · tap a friend to talk/pet</div>
+        <div><b>Touch:</b> left thumb moves · drag right side to look · tap a friend to talk/pet · tap a note to read</div>
         <div><b>Gather:</b> hold Use (or press and hold on a tree or rock) to chop and break</div>
-        <div><b>Desktop:</b> WASD · mouse look · Space jump · E use (hold to gather) · B build · R rotate · X remove · 1–0 pieces · I pack · T talk</div>
+        <div><b>Desktop:</b> WASD · mouse look · Space jump · E use · B build · R rotate · X remove · 1–0 slots · I pack · T talk · G throw stick · Esc/P pause</div>
       </div>
     </div>
   </div>

@@ -1,4 +1,4 @@
-# Models used by the game (M0 + M1 chunk A)
+# Models used by the game (M0 + M1 chunks A/B)
 
 Only the files in use are here. Everything was copied from `../../art/assets`.
 
@@ -26,6 +26,13 @@ converts them to flat Lambert. `KHR_materials_emissive_strength` lands in `emiss
 | props/chest.glb | build piece: storage chest; `lid_hinge` opens to −75° X | `chestPiece` |
 | props/bedroll.glb | build piece: bed roll | `bedrollPiece` |
 
+| build/lakeside_bench.glb | build piece: lakeside bench (unlocked by a request) | `benchPiece` |
+| decor/herb_bundle.glb, woven_rug.glb, biscuit_bed.glb, crystal_wind_chime.glb | decorations from Wren's requests (rug on floors, bundle/chime hang under a roof, bed has a `sleep_point`) | `herbBundle`, `wovenRug`, `biscuitBed`, `windChime` |
+| keepsakes/*.glb (brass_button, blue_marble, tin_whistle, feather_owl, waylamp_key, keeper_charm, tiny_lantern) | Biscuit's keepsake finds, placed on a table or chest top | `ks_*` |
+| lore/note_paper.glb, journal_page.glb, note_slate.glb, waylamp_hook.glb | lore notes in the world (merged into one mesh + one glow mesh) | `loreNote`, `loreJournal`, `loreSlate`, `loreHook` |
+
+`../ui/parchment_reader.png` is the 9-slice frame of the note reader.
+
 Hearth and table have no art yet and use primitives (`src/build/shelter.js` → `fallback()`).
 
 Biscuit's sit, play-bow and curled poses (`biscuit-sit/-playbow/-curled.glb` in art/) are baked into
@@ -52,5 +59,6 @@ Root trees, glowcap and crystal-shard pickups are procedural (`src/entities/harv
 ## Icons (`../icons/`, 128 px, from art/assets/icons)
 
 wood, stone, glowcap, crystal (shard), chest, bedroll, wall-log, wall-log-door, wall-log-window,
-floor-plank, roof-log, lantern_double. Items/pieces without an icon (flint, mushroom, hearth, table)
+floor-plank, roof-log, lantern_double, plus (chunk B) stew-bowl, stick, note_paper, note_slate, journal_page, the four decorations,
+lakeside_bench and the seven keepsakes. Items/pieces without an icon (flint, mushroom, hearth, table)
 use an emoji.

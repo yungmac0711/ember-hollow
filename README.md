@@ -1,4 +1,4 @@
-# Ember Hollow — M0 prototype + M1 chunk A (gathering & building)
+# Ember Hollow — M0 prototype + M1 chunks A/B (gathering, building, save, Biscuit v2, Wren's requests & lore)
 
 A cozy, dark-fantasy cave-survival game for the phone. You are **Cam**. You explore a cave, gather
 wood, stone and flint, and light a campfire to push the fog back. **Wren** keeps you company and
@@ -26,7 +26,8 @@ URL flags:
 - `?fps=1`: performance overlay
 - `?seed=N`: different cave decoration and item layout
 - `?nosw=1`: skip the service worker, for development
-- `?autostart=1`: skip the "Tap to begin" screen
+- `?autostart=1`: skip the title screen
+- `?noskin=1`: draw Wren/Biscuit part-by-part (debug; default folds them into one skinned mesh)
 - `?llm=http`: use the HTTP LLM adapter (see *Companion chat*)
 - `?low=1`: low-end tier (1 real point light instead of 2)
 
@@ -43,6 +44,10 @@ URL flags:
 | Hotbar / pack | Bottom bar; 🎒 opens the pack | 1–6, I / Tab |
 | Talk to Wren | Tap Wren, or the 💬 button | T / Enter |
 | Pet Biscuit | Tap Biscuit when he's close | E when close |
+| Throw Biscuit's stick | the dashed *fetch* slot in the hotbar | G |
+| Pause / save | ⏸ (top right): Resume, Save game | Esc / P |
+| Read a note | Tap it, or Use when facing it; re-read from the 🎒 Journal | E |
+| Hand Wren a request | Talk to her, or *Give to Wren* in the tracker | T |
 | Build mode | 🔨 toggles; pick a piece in the bar, Use to place, ⟳ rotate, 🗑 remove (full refund) | B, 1–0, E, R, X |
 
 **Goal:** collect **4 wood + 1 flint** and light a campfire in a clear spot. Flint shows up mostly on
@@ -62,6 +67,28 @@ when it fits and red (with a reason) when it doesn't. Costs: floor 2 wood + 1 st
 window 3 wood + 1 stone, door 4 wood, roof 3 wood + 1 stone, hearth 2 wood + 6 stone, bed roll 2 wood,
 lantern 1 wood + 2 stone, table 4 wood, chest 5 wood + 1 stone. The hearth is a real campfire (feed it
 wood to light it). The chest has its own storage panel; tap a stack to move it.
+
+**Chunk B (M1):**
+- **Save/load.** One versioned JSON save in `localStorage['ember_hollow.save']` (v1): pack, every
+  piece (door open state, chest contents), fire fuel (hearths by piece id, campfires by position), Cam's
+  position, requests, read notes, keepsakes found, day count. Autosaves every 30 s and when the app is
+  hidden (`visibilitychange` / `pagehide`), plus *Save game* in the pause menu. Wren's memory stays in
+  its own key (`ember_hollow.companion_memory`) and survives New Game. Pickups and trees/rocks are not
+  saved (they respawn).
+- **Title screen** (text from `story/data/ui_text.json`): slow camera orbit around the camp fire behind
+  a translucent menu; *Continue* only when a save exists; *New Game* asks first if it would replace one;
+  the tap that starts also unlocks iOS audio. A random loading tip each time.
+- **Biscuit v2:** pet him (hearts, then a play-bow), he barks ("woof!" bubble + `audio.bark()` hook) at
+  unread notes, new areas and nearby flint/glowcaps/shards; gallops when fast; zoomies when you come back
+  after a while; fetch from the hotbar stick; digs now and then (finds from `biscuit_finds.json`:
+  60/30/10 common/uncommon/rare, some give items, 7 are placeable keepsakes, rare ones get a Wren line);
+  sleeps on his bed if you built one. He and Wren steer around placed pieces.
+- **Wren:** offline reply bank (`wren_replies.json`, DATA_FORMATS matching), ambient lines from
+  `ambient_lines.json` (with `when` filters, a line on every placement and one for a finished shelter),
+  gathers stray pickups for you, and gives **requests** (one at a time, chains, HUD tracker, needs are
+  consumed; rewards are items, decorations to place, or new build pieces).
+- **Lore notes:** 6 notes placed around the cave (2 more belong to areas that don't exist yet), read on
+  a parchment reader, kept in the 🎒 Journal. Item tooltips use `item_flavor.json`.
 
 ## What's in M0
 
@@ -203,7 +230,7 @@ version, so installed copies pick up the update.
 
 ## Companion chat: swapping in a real LLM (later)
 
-`src/config.js → CONFIG.llm.provider` picks the adapter: `'stub'` (default) or `'http'`.
+`src/config.js → CONFIG.llm.provider` picks the adapter: `'bank'` (default, Wren's offline reply bank), `'stub'` (old M0 canned replies) or `'http'`.
 `src/companion/llm/http-adapter.js` posts an OpenAI-style `{model, messages}` body to
 `CONFIG.llm.http.endpoint`.
 
@@ -231,14 +258,16 @@ game/
 │   ├── audio.js          # WebAudio crackle + blips, unlocked on first tap
 │   ├── render/           # lights.js (LightBudget + emitters), character-materials.js (lift + rim)
 │   ├── render/ambient.js # firelight-aware hemisphere/fog colours + zone tints
-│   ├── world/            # cave.js (SDF cave, meshes, collision), colliders.js (piece colliders), decor.js, dressing.js, noise.js
+│   ├── world/            # cave.js (SDF cave, meshes, collision), colliders.js (piece colliders + steering), lore.js (notes + parchment reader), decor.js, dressing.js, noise.js
+│   ├── save/save.js      # versioned save in localStorage, New Game flag
+│   ├── data/story.js     # GENERATED from ../story/data by tools/sync-story.mjs (bank, ambient, requests, lore, finds, flavor, ui text)
 │   ├── input/input.js    # multitouch joystick/look/buttons/taps + keyboard/pointer-lock
 │   ├── entities/         # player.js, items.js, harvest.js (trees/rocks), puppy.js + biscuit-rig.js + biscuit-poses.js (Biscuit)
 │   ├── fire/campfire.js  # campfires, fuel, flames/embers, flickering light emitters
 │   ├── build/            # pieces.js (catalogue + costs), shelter.js (snap, ghost, instancing, doors, chests)
 │   ├── companion/        # wren.js, wren-anim.js, chat-ui.js, ambient.js, memory.js, context.js,
-│   │   │                 # story-data.js (GENERATED from ../story), llm/ adapters
-│   └── ui/               # hud.js (hints, fuel bar, subtitles, toasts, FPS), inventory-ui.js (hotbar, pack, chest, palette, ring)
+│   │   │                 # requests.js, when.js (state `when` filters), story-data.js (GENERATED), llm/ adapters (bank-adapter.js)
+│   └── ui/               # hud.js, inventory-ui.js (hotbar, pack + journal, chest, palette, ring), tap.js (iOS-safe taps)
 ├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs, screenshots.mjs,
 │                         # extract-biscuit-poses.mjs, pose-preview.html (dev pose viewer)
 ├── screenshots/          # art-review phone screenshots (1688×780), not precached
@@ -260,7 +289,8 @@ breaks.
 
 The writer's files in `../story/` are the source of truth. After they change, run
 `node tools/sync-story.mjs`. It regenerates `src/companion/story-data.js` (system prompt, context
-template, the 32 ambient lines), and then you run `node tools/build-sw.mjs`.
+template) and `src/data/story.js` (reply bank, ambient lines, requests, lore, Biscuit's finds, item
+flavor, UI text), and then you run `node tools/build-sw.mjs`.
 
 ## Testing
 
@@ -279,11 +309,18 @@ The test emulates an iPhone in landscape (844×390, touch). It:
 - M1: hold-to-chop with Use, press-and-hold a rock by touch, the new pickups, placing a floor / wall /
   roof / door / chest, rotate, door open (−100°, leaf collider off) and close, chest store and take,
   remove with full refund, and a 60-piece perf test (`m1.perf60`)
+- hotfix: real CDP taps on the build palette / 🔨 / pack ✕ with trusted clicks swallowed (iOS), plus a
+  swipe that must scroll, not select (`m1.touchUI`)
+- chunk B: the title (ui_text, no Continue on a fresh profile, touch on New Game), pet, fetch, a dig,
+  a bank chat reply, a request offered → needs carried → *Give to Wren* by touch → completed, a note
+  opened and closed by touch → in the journal, then save → reload → *Continue* restores pieces, pack,
+  notes, requests and position (`title`, `m2`, `reload`)
 - confirms the service worker activates
 
 Screenshots go to `docs/screenshot.png` and `docs/test-output/`. The perf block reports draw calls,
 triangles, real point lights and how many are active, the hemisphere intensity, and Wren's hood.
-Add `QUERY=low=1` to test the low tier.
+Add `QUERY=low=1` to test the low tier. It exits non-zero on any error, failed request, or failed
+`touchUI` / `title` / `m2` / `reload` check.
 
 `node tools/screenshots.mjs` saves the art-review shots (1688×780) to `screenshots/`: the lit
 campfire with Wren and Biscuit, a crystal chamber, and a torchlit tunnel.

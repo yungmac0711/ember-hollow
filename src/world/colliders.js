@@ -1,5 +1,6 @@
 // Simple 2D colliders on top of the cave field: circles (trees, rocks) and oriented boxes
-// (walls, closed doors). The player (and nothing else, for now) is pushed out of them.
+// (walls, closed doors). The player, Wren and Biscuit are pushed out of them; Wren and Biscuit also
+// steer around them with a short feeler (steer(), Chunk B) and hop to Cam if they get properly stuck.
 export class Colliders {
   constructor() { this.list = new Set(); }
 
@@ -34,4 +35,28 @@ export class Colliders {
       }
     }
   }
+
+  /** Would a body of radius r at (x,z) overlap an active collider? */
+  hits(x, z, r) {
+    _p.x = x; _p.z = z; this.resolve(_p, r);
+    return Math.abs(_p.x - x) + Math.abs(_p.z - z) > 1e-4;
+  }
+}
+const _p = { x: 0, z: 0 };
+
+/**
+ * Feeler steering for companions: returns a heading near `heading` whose point `look` metres ahead
+ * is free of colliders (tries ±35°, ±70°, ±105°, ±140°, keeping the side it picked last time so it
+ * doesn't dither). `mem` is a small per-agent object.
+ */
+export function steer(colliders, pos, heading, r, mem, look = 0.75) {
+  if (!colliders || !colliders.list.size) return heading;
+  const side = mem.side || 1;
+  for (const k of [0, 1, 2, 3, 4]) {
+    for (const sgn of k ? [side, -side] : [1]) {
+      const h = heading + sgn * k * 0.61;
+      if (!colliders.hits(pos.x + Math.sin(h) * look, pos.z + Math.cos(h) * look, r)) { if (k) mem.side = sgn; return h; }
+    }
+  }
+  return heading;
 }
