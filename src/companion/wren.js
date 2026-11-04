@@ -1,9 +1,17 @@
-// Wren Ashby — companion body. Uses Kenney character-female GLB (skinned, idle/walk/sit clips) when
-// available, otherwise a primitive placeholder. Carries her grandmother's waylamp: a real-time
-// PointLight (style guide: #E08A2E, 2, 5, 2) that fades out inside a campfire's light radius.
+// Wren Ashby — companion body.
+// M0 art pass: the custom Style-A wren.glb (art director) is a node hierarchy with joint pivots, no
+// skinning:  Wren > hips > {leg_L, leg_R, torso > {satchel, cloak > hood_down, head, arm_L, arm_R}}, lantern
+// WrenAnimator (wren-anim.js) drives it procedurally: walk cycle, idle breathing/sway, sit-warming
+// at the fire, lantern pendulum swing, cloak sway and a hood up/down gesture. The hood_up node is
+// grafted from wren-hood-up.glb. Falls back to a primitive placeholder if the GLB fails to load.
+// Her grandmother's waylamp is a light *emitter* (§8: #E08A2E, 3.0, 6, decay 2) that competes for a
+// slot in the LightBudget and fades out inside a lit campfire's radius.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { lambert } from '../assets.js';
+import { Emitter } from '../render/lights.js';
+import { liftCharacter } from '../render/character-materials.js';
+import { WrenAnimator } from './wren-anim.js';
 
 export function buildWrenPrimitive() {
   const root = new THREE.Group();
@@ -36,7 +44,11 @@ function buildWaylamp() {
 }
 
 export class Wren {
-  constructor(scene, cave, model, startPos) {
+  /**
+   * @param model  { root, hoodUp?: Object3D, fromFile }  (root = wren.glb scene or primitive)
+   * @param budget LightBudget for the lantern emitter
+   */
+  constructor(scene, cave, model, startPos, budget) {
     this.cave = cave;
     this.root = new THREE.Group();
     this.model = model.root;
@@ -45,25 +57,23 @@ export class Wren {
     this.heading = Math.PI;
     this.speed = 0;
     this.state = 'follow';
-    this.mixer = null;
-    this.actions = {};
-    this.current = null;
-    if (model.animations?.length) {
-      this.mixer = new THREE.AnimationMixer(this.model);
-      for (const clip of model.animations) this.actions[clip.name] = this.mixer.clipAction(clip);
-      this._play('idle');
-      // Art note: Kenney Mini Characters read young; shrink the head ~15% so she reads adult.
-      const headBone = this.model.getObjectByName('head');
-      if (headBone) headBone.scale.setScalar(0.85);
-    }
-    // waylamp at hip height (+ the real light)
-    this.lamp = buildWaylamp();
-    this.lamp.position.set(0.3, 0.7, 0.12);
-    this.root.add(this.lamp);
+    this.anim = null;
     const L = CONFIG.companion.lantern;
-    this.light = new THREE.PointLight(L.color, L.intensity, L.distance, 2);
-    this.light.position.set(0.3, 0.85, 0.15);
-    this.root.add(this.light);
+    this.emitter = budget.add(new Emitter({ color: L.color, intensity: 0, distance: L.distance, decay: 2, priority: 2 }));
+    this._lampOffset = new THREE.Vector3(0, 0.12, 0);
+    if (model.fromFile) {
+      this.anim = new WrenAnimator(this.model, model.hoodUp || null);
+      if (!this.anim.ok) { console.warn('[wren] wren.glb missing pivots; static pose'); }
+      this.lampNode = this.anim.lantern;
+      const pl = this.lampNode?.userData?.pointLight;
+      if (pl?.offset) this._lampOffset.fromArray(pl.offset);
+    } else {
+      // primitive fallback: a separate little waylamp at hip height
+      this.lampNode = buildWaylamp();
+      this.lampNode.position.set(0.3, 0.7, 0.12);
+      this.root.add(this.lampNode);
+    }
+    liftCharacter(this.root); // STYLE_GUIDE §8 backlight fix (lantern crystal keeps its own glow)
     this.lightOn = 1;
     // blob shadow
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.35, 12),
@@ -76,28 +86,42 @@ export class Wren {
     scene.add(this.root);
     this.target = new THREE.Vector3();
     this.status = 'beside Cam';
+    this._nearFireT = 0;
+    this._hoodT = 999;
+    this.hoodUp = false;
+    this._hoodInit = false;
   }
 
-  _play(name, fade = 0.25) {
-    const a = this.actions[name];
-    if (!a || this.current === a) return;
-    a.reset().fadeIn(fade).play();
-    if (this.current) this.current.fadeOut(fade);
-    this.current = a;
+  /** Hood logic (judgement call, documented in README): the hood goes UP when the Long Dark is
+   * thick around her (fire out, or far from any lit fire) and comes DOWN once she has sat in a lit
+   * fire's warmth for a few seconds or the fog is thin. At least 10 s between changes so it never
+   * flickers at the edge of the light. Spawn: no fire yet → fog thick → she starts hood-up. */
+  _updateHood(dt, env, inFire) {
+    const H = CONFIG.companion.hood;
+    this._nearFireT = inFire ? this._nearFireT + dt : 0;
+    this._hoodT += dt;
+    const wantUp = env.fog === H.upWhenFog && !inFire;
+    const wantDown = this._nearFireT > H.downNearFireSeconds || env.fog === 'thin';
+    if (!this._hoodInit) { this._hoodInit = true; this.hoodUp = wantUp; this.anim?.setHood(wantUp, true); return; }
+    if (this._hoodT < H.minToggleSeconds) return;
+    if (!this.hoodUp && wantUp) { this.hoodUp = true; this._hoodT = 0; this.anim?.setHood(true); }
+    else if (this.hoodUp && wantDown) { this.hoodUp = false; this._hoodT = 0; this.anim?.setHood(false); }
   }
 
-  update(dt, player, fires, talking) {
+  update(dt, player, fires, talking, env = { fog: 'thick' }) {
     const pp = player.pos;
     const fire = fires.nearest(pp, Infinity, true);
     const inFire = fire && Math.hypot(pp.x - fire.pos.x, pp.z - fire.pos.z) < fire.lightRadius;
+    const selfInFire = fire && Math.hypot(this.pos.x - fire.pos.x, this.pos.z - fire.pos.z) < fire.lightRadius;
     let moveSpeed = 0, face = pp;
     if (inFire && !talking) {
       // settle on the far side of the fire from Biscuit and warm her hands
       const ang = Math.atan2(pp.z - fire.pos.z, pp.x - fire.pos.x) - 1.0;
-      this.target.set(fire.pos.x + Math.cos(ang) * 1.5, 0, fire.pos.z + Math.sin(ang) * 1.5);
+      this.target.set(fire.pos.x + Math.cos(ang) * 1.55, 0, fire.pos.z + Math.sin(ang) * 1.55);
       this.cave.resolve(this.target, 0.6);
       const d = Math.hypot(this.target.x - this.pos.x, this.target.z - this.pos.z);
-      if (d > 0.3) { moveSpeed = Math.min(3, 0.8 + d); face = this.target; this.state = 'toFire'; }
+      if (d > 0.3 && this.state !== 'fire') { moveSpeed = Math.min(3, 0.8 + d); face = this.target; this.state = 'toFire'; }
+      else if (d > 1.2) { this.state = 'toFire'; moveSpeed = 1.5; face = this.target; }
       else { face = fire.pos; this.state = 'fire'; }
     } else {
       // walk alongside Cam, slightly behind and to the right
@@ -112,7 +136,8 @@ export class Wren {
     }
     const want = Math.atan2(face.x - this.pos.x, face.z - this.pos.z);
     let dh = want - this.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    this.heading += dh * Math.min(1, dt * 6);
+    const turn = dh * Math.min(1, dt * 6);
+    this.heading += turn;
     this.speed += (moveSpeed - this.speed) * Math.min(1, dt * 5);
     if (this.speed > 0.02) {
       this.pos.x += Math.sin(this.heading) * this.speed * dt;
@@ -123,23 +148,30 @@ export class Wren {
     this.root.position.copy(this.pos);
     this.root.rotation.y = this.heading;
 
-    if (this.mixer) {
-      if (this.speed > 2.6) this._play(this.actions.sprint ? 'sprint' : 'walk');
-      else if (this.speed > 0.35) this._play('walk');
-      else if (this.state === 'fire') this._play(this.actions.crouch ? 'crouch' : 'idle', 0.5);
-      else this._play('idle');
-      if (this.current && this.current === this.actions.walk) this.current.timeScale = Math.max(0.6, this.speed / 1.6);
-      this.mixer.update(dt);
+    this._updateHood(dt, env, selfInFire || this.state === 'fire');
+    if (this.anim) {
+      // head looks toward Cam when she's standing around or talking (relative to her heading)
+      let look = Math.atan2(pp.x - this.pos.x, pp.z - this.pos.z) - this.heading;
+      look = Math.atan2(Math.sin(look), Math.cos(look));
+      this.anim.update(dt, {
+        speed: this.speed,
+        turnRate: dt > 0 ? turn / dt : 0,
+        sit: this.state === 'fire' && this.speed < 0.4,
+        look: (this.state === 'idle' || talking) ? look : 0,
+        talking,
+      });
     } else {
       this.model.position.y = Math.abs(Math.sin(performance.now() / 180)) * 0.03 * Math.min(1, this.speed);
     }
 
-    // Waylamp off inside the campfire's light (light budget) — fade, don't pop.
+    // Waylamp emitter: off inside the campfire's light (light budget) — fade, don't pop.
     const want2 = inFire ? 0 : 1;
     this.lightOn += (want2 - this.lightOn) * Math.min(1, dt * 2);
-    this.light.intensity = CONFIG.companion.lantern.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
-    this.light.visible = true; // keep it in the scene so the light count never changes
+    this.lampNode.updateWorldMatrix(true, false);
+    this.emitter.pos.copy(this._lampOffset).applyMatrix4(this.lampNode.matrixWorld);
+    this.emitter.intensity = CONFIG.companion.lantern.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
 
-    this.status = this.state === 'fire' ? 'warming her hands by the fire' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
+    this.status = this.state === 'fire' ? 'sitting by the fire, warming her hands' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
+    if (this.hoodUp) this.status += ', hood up against the cold';
   }
 }

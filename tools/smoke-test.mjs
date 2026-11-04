@@ -24,7 +24,7 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('requestfailed', (r) => failed.push(r.url() + ' ' + r.failure()?.errorText));
 page.on('response', (r) => { if (r.status() >= 400) failed.push(`${r.status()} ${r.url()}`); });
 
-await page.goto(BASE + 'index.html?fps=1', { waitUntil: 'load' });
+await page.goto(BASE + 'index.html?fps=1' + (process.env.QUERY ? '&' + process.env.QUERY : ''), { waitUntil: 'load' });
 await page.waitForFunction(() => window.__game?.ready, null, { timeout: 60000 });
 await page.screenshot({ path: OUT + 'test-output/01-start.png' });
 await page.touchscreen.tap(422, 300); // "Tap to begin"
@@ -95,7 +95,7 @@ const mem = await page.evaluate(() => JSON.parse(localStorage.getItem('ember_hol
 const ctxBlock = await page.evaluate(async () => (await import('./src/companion/context.js')).buildContextBlock(__game.gameState()));
 await page.evaluate(() => __game.chat.hide());
 
-const perf = await page.evaluate(() => { const i = __game.renderer.info; return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2 }; });
+const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
 console.log(JSON.stringify({ moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, errors, warnings, failed }, null, 2));

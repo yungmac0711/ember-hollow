@@ -2,8 +2,13 @@
 // follows at 2–4 m, bounds to catch up > 8 m, teleports behind Cam > 25 m, sniffs around when Cam
 // idles and lies down after 20 s, sits facing a lit fire when Cam is inside its light, whines and
 // stays close when the fire goes out, tail-wag + hop + hearts when petted.
+// M0 art pass: when the custom Style-A biscuit.glb is loaded, BiscuitRig drives its node pivots
+// (pose blending + procedural walk/tail/ears/jaw); the primitive below is only the fallback.
+// Extra poses: curled up by a long-lit fire while Cam is idle; play bow when Cam returns or pets him.
 import * as THREE from 'three';
 import { lambert } from '../assets.js';
+import { BiscuitRig } from './biscuit-rig.js';
+import { liftCharacter } from '../render/character-materials.js';
 
 const FAWN = 0xc98a4b, MASK = 0x1c1a19, WHITE = 0xefe6d8, EAR = 0x8a5a2e, COLLAR = 0xc2571e;
 
@@ -54,6 +59,19 @@ export class Puppy {
     this.cave = cave;
     this.root = model.root;
     this.p = model.parts;
+    this.rig = null;
+    if (model.fromFile) {
+      const rig = new BiscuitRig(model.root);
+      if (rig.ok) {
+        this.rig = rig;
+        const holder = new THREE.Group(); holder.add(model.root); this.root = holder; // root = heading pivot
+        const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.32, 12),
+          new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
+        shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02; holder.add(shadow);
+      } else console.warn('[puppy] biscuit.glb is missing expected nodes; using primitive animation');
+    }
+    liftCharacter(this.root); // STYLE_GUIDE §8 backlight fix (skips the glowing tag + shadow)
+    this._away = false; this._pantT = 0;
     this.pos = startPos.clone();
     this.heading = 0;
     this.state = 'follow';
@@ -85,7 +103,7 @@ export class Puppy {
   }
 
   pet() {
-    this.petTime = 2.2; this.hop = 1;
+    this.petTime = 2.2; this.hop = this.rig ? 0 : 1;
     this.state = 'petted'; this.stateTime = 0;
     this._hearts.forEach((h, i) => { h.t = -i * 0.25; });
     this.events.push('petted');
@@ -110,9 +128,16 @@ export class Puppy {
       this._setState('follow');
     }
 
+    // Cam came back after wandering off → play bow
+    if (dPlayer > 9) this._away = true;
+    if (this._away && dPlayer < 3 && this.state !== 'petted') { this._away = false; this._setState('playbow'); this.events.push('playbow'); }
+
     let moveSpeed = 0;
     let face = null;
-    if (this.state === 'petted') {
+    if (this.state === 'playbow') {
+      face = pp;
+      if (this.stateTime > 1.4) this._setState('idle');
+    } else if (this.state === 'petted') {
       if (this.stateTime > 2.2) this._setState('idle');
       face = pp;
     } else if (playerInFire && this.state !== 'whine') {
@@ -121,8 +146,13 @@ export class Puppy {
       this.target.set(fire.pos.x + Math.cos(ang) * 1.3, 0, fire.pos.z + Math.sin(ang) * 1.3);
       this.cave.resolve(this.target, 0.5);
       const d = Math.hypot(this.target.x - this.pos.x, this.target.z - this.pos.z);
-      if (d > 0.25) { this._setState('toFire'); moveSpeed = Math.min(3.2, 1 + d); face = this.target; }
-      else { this._setState('fireSit'); face = fire.pos; }
+      if (d > 0.25 && this.state !== 'curled') { this._setState('toFire'); moveSpeed = Math.min(3.2, 1 + d); face = this.target; }
+      else {
+        // after a good while by a lit fire with Cam idle, he curls up; any movement wakes him
+        const curl = this.state === 'curled' ? player.stillTime > 0.5
+          : this.state === 'fireSit' && this.stateTime > 25 && player.stillTime > 12;
+        this._setState(curl ? 'curled' : 'fireSit'); face = fire.pos;
+      }
     } else if (this.state === 'whine') {
       // fire went out: stay close (1–2 m)
       if (dPlayer > 1.6) { moveSpeed = Math.min(4, dPlayer * 1.5); face = pp; } else face = pp;
@@ -132,7 +162,7 @@ export class Puppy {
       moveSpeed = dPlayer > 8 ? 6.5 : Math.min(4.5, 1.2 + (dPlayer - 2) * 1.4);  // bound when far
       face = pp;
     } else {
-      if (this.state === 'follow' || this.state === 'toFire' || this.state === 'fireSit') this._setState('idle');
+      if (['follow', 'toFire', 'fireSit', 'curled'].includes(this.state)) this._setState('idle');
       // idle: sniff around, wander in small circles, lie down after 20 s of Cam idling
       if (this.state === 'idle' && this.stateTime > 2 + Math.random() * 3) {
         tmp.set(pp.x + (Math.random() - 0.5) * 4, 0, pp.z + (Math.random() - 0.5) * 4);
@@ -162,7 +192,13 @@ export class Puppy {
     }
     this.pos.y = this.cave.floorAt(this.pos.x, this.pos.z);
 
-    // Pose blending
+    this.root.position.copy(this.pos);
+    this.root.rotation.y = this.heading;
+    this._updateHearts(dt);
+    this._updateStatus(dPlayer);
+    if (this.rig) { this._animateRig(dt, player); return; }
+
+    // Pose blending (primitive fallback)
     const sitting = this.state === 'fireSit' || this.state === 'petted' || (this.state === 'idle' && player.stillTime > 3);
     const lying = this.state === 'lie';
     this.sit += ((sitting ? 1 : 0) - this.sit) * Math.min(1, dt * 5);
@@ -192,10 +228,27 @@ export class Puppy {
     tail.rotation.y = Math.sin(this._wagT) * (this.state === 'whine' ? 0.2 : 0.6);
     tail.rotation.x = this.state === 'whine' ? -0.2 : 0.7;
 
-    this.root.position.copy(this.pos);
-    this.root.rotation.y = this.heading;
+  }
 
-    // hearts
+  _animateRig(dt, player) {
+    const st = this.state;
+    if (this.speed > 3) this._pantT = 4; else this._pantT = Math.max(0, this._pantT - dt);
+    this.sniff += ((st === 'sniffing' || st === 'wander' ? 1 : 0) - this.sniff) * Math.min(1, dt * 4);
+    this.petTime = Math.max(0, this.petTime - dt);
+    const pose = st === 'curled' || st === 'lie' ? 'curled'
+      : st === 'playbow' || (st === 'petted' && this.stateTime < 0.9) ? 'playbow'
+      : st === 'fireSit' || st === 'petted' || (st === 'idle' && player.stillTime > 3) ? 'sit' : 'stand';
+    const tail = st === 'whine' ? 'tucked' : st === 'petted' || st === 'playbow' ? 'high' : 'happy';
+    const wag = { petted: 1, playbow: 1, fireSit: 0.45, follow: 0.7, toFire: 0.8, whine: 0.25, curled: 0, lie: 0 }[st] ?? 0.55;
+    this.rig.update(dt, {
+      pose, tail, wag, speed: this.speed,
+      pant: this._pantT > 0 ? 1 : st === 'fireSit' ? 0.5 : 0,
+      tilt: st === 'idle' ? Math.sin(this.stateTime * 0.8) * 0.18 : 0,
+      sniff: this.sniff,
+    });
+  }
+
+  _updateHearts(dt) {
     for (const h of this._hearts) {
       h.t += dt;
       h.s.visible = h.t > 0 && h.t < 1.4;
@@ -204,8 +257,11 @@ export class Puppy {
         h.s.material.opacity = 1 - h.t / 1.4;
       }
     }
+  }
 
-    this.status = this.state === 'fireSit' ? 'sitting by the fire' : this.state === 'lie' ? 'lying down, dozing'
+  _updateStatus(dPlayer) {
+    this.status = this.state === 'curled' ? 'curled up asleep by the fire' : this.state === 'playbow' ? 'play-bowing, tail going'
+      : this.state === 'fireSit' ? 'sitting by the fire' : this.state === 'lie' ? 'lying down, dozing'
       : this.state === 'sniffing' || this.state === 'wander' ? 'sniffing around' : this.state === 'whine' ? 'whining softly, pressed close'
       : this.state === 'petted' ? 'wagging, just got ear scratches' : dPlayer > 6 ? 'trotting to catch up' : 'near';
     if (this.state === 'fireSit' && this.stateTime > 8 && !this._saidFire) { this._saidFire = true; this.events.push('fireSit'); }

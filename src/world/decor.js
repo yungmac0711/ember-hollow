@@ -44,7 +44,8 @@ export function buildDecor(scene, cave, seed = 1, sources = {}) {
   group.add(stems, caps);
 
   // --- Crystals ----------------------------------------------------------------------------
-  const crysPts = [
+  // (procedural octahedron fallback; skipped when the art-director crystal GLBs are dressed in)
+  const crysPts = sources.skipCrystals ? [] : [
     ...scatter(cave, rng, 55, { minF: -0.2, maxF: 1.4, chamber: grotto }),
     ...scatter(cave, rng, 14, { minF: -0.1, maxF: 1.0 }),
   ];
@@ -58,7 +59,7 @@ export function buildDecor(scene, cave, seed = 1, sources = {}) {
     crystals.setMatrixAt(i, _m);
     crystals.setColorAt(i, capCol.setHex(cpal[(rng() * cpal.length) | 0]).multiplyScalar(0.75 + rng() * 0.35));
   });
-  group.add(crystals);
+  if (crysPts.length) group.add(crystals);
 
   // --- Stalactites & stalagmites -----------------------------------------------------------
   const tites = scatter(cave, rng, 120, { minF: 0.4, maxF: 6 });
@@ -116,16 +117,19 @@ export function buildDecor(scene, cave, seed = 1, sources = {}) {
     [sources.boulder, scatter(cave, rng, 45, { minF: 0.0, maxF: 1.1 }), 0.9, 2.2],
     [sources.pillar, scatter(cave, rng, 30, { minF: -0.2, maxF: 0.6 }), 0.8, 2.4],
   ];
+  const boulders = []; // placements (for moss caps): {x, z, top, sc, yaw}
   for (const [src, pts, smin, smax] of rockSets) {
     if (!src) continue;
+    // one transform per placement, shared by all of the model's parts
+    const xf = pts.map((p) => {
+      const sc = smin + rng() * (smax - smin), sy = sc * (0.8 + rng() * 0.6), yaw = rng() * 6.28;
+      const y = cave.floorAt(p.x, p.z) - 0.1 * sc;
+      if (src === sources.boulder) boulders.push({ x: p.x, z: p.z, top: y + (src.height || 1) * sy, sc, yaw });
+      return { p: new THREE.Vector3(p.x, y, p.z), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), s: new THREE.Vector3(sc, sy, sc) };
+    });
     for (const part of src) {
       const im = new THREE.InstancedMesh(part.geometry, part.material, pts.length);
-      pts.forEach((p, i) => {
-        const sc = smin + rng() * (smax - smin);
-        _q.setFromEuler(_e.set(0, rng() * 6.28, 0));
-        _m.compose(_p.set(p.x, cave.floorAt(p.x, p.z) - 0.1 * sc, p.z), _q, _s.set(sc, sc * (0.8 + rng() * 0.6), sc));
-        im.setMatrixAt(i, _m);
-      });
+      xf.forEach((t, i) => { _m.compose(t.p, t.q, t.s); im.setMatrixAt(i, _m); });
       group.add(im);
     }
   }
@@ -138,6 +142,7 @@ export function buildDecor(scene, cave, seed = 1, sources = {}) {
     group,
     mushrooms: mushPts,
     crystals: crysPts,
+    boulders,
     update(dt) {
       t += dt;
       const a = moteGeo.attributes.position.array;

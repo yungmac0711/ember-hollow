@@ -39,6 +39,26 @@ export async function loadModel(name, factory) {
   return { root, parts, animations: [], fromFile: false };
 }
 
+/**
+ * glTF materials (MeshStandardMaterial) → cheap flat Lambert, keeping colour, texture map, vertex
+ * colours and emissive + emissiveIntensity (KHR_materials_emissive_strength lands in
+ * emissiveIntensity in three r150+). Mobile budget: no PBR in the game.
+ */
+export function toLambert(src, opts = {}) {
+  const m = new THREE.MeshLambertMaterial({
+    map: src.map || null,
+    color: opts.color != null ? opts.color : (src.color ? src.color.clone() : 0xffffff),
+    emissive: opts.emissive != null ? opts.emissive : (src.emissive ? src.emissive.clone() : 0x000000),
+    emissiveIntensity: src.emissiveIntensity ?? 1,
+    vertexColors: !!src.vertexColors,
+    transparent: !!src.transparent, opacity: src.opacity ?? 1,
+    side: src.side,
+    flatShading: true,
+  });
+  m.name = src.name || '';
+  return m;
+}
+
 // Shared helper for primitive builders
 export function lambert(color, extra = {}) {
   return new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
@@ -48,7 +68,7 @@ export function lambert(color, extra = {}) {
  * Load a static GLB as flat parts for InstancedMesh use: node transforms are baked into each
  * geometry, materials become cheap Lambert (keeping the Kenney colormap texture).
  * @param {string} name  CONFIG.assets.models key
- * @param {object} opts  { size: target max horizontal extent in metres, color: tint override, emissive }
+ * @param {object} opts  { size: target max horizontal extent in metres, color: tint override, emissive, raw }
  * @returns {Promise<Array<{geometry: THREE.BufferGeometry, material: THREE.Material}>|null>}
  */
 export async function loadParts(name, opts = {}) {
@@ -62,7 +82,9 @@ export async function loadParts(name, opts = {}) {
     const box = new THREE.Box3().setFromObject(root);
     const size = box.getSize(new THREE.Vector3());
     const k = opts.size ? opts.size / Math.max(size.x, size.z, 1e-4) : 1;
-    const norm = new THREE.Matrix4().makeScale(k, k, k)
+    // opts.raw: keep the file's own origin/units (art-director GLBs: metres, origin at base, +Z
+    // facing; the wall torch's back plate sits at z=0), otherwise centre + normalise (Kenney kits)
+    const norm = opts.raw ? new THREE.Matrix4() : new THREE.Matrix4().makeScale(k, k, k)
       .multiply(new THREE.Matrix4().makeTranslation(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2));
     const parts = [];
     root.traverse((o) => {
@@ -71,14 +93,17 @@ export async function loadParts(name, opts = {}) {
       g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(norm, o.matrixWorld));
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       const src = mats[0];
-      const material = new THREE.MeshLambertMaterial({
-        map: src.map || null,
-        color: opts.color != null ? opts.color : (src.color ? src.color.clone() : 0xffffff),
-        emissive: opts.emissive != null ? opts.emissive : 0x000000,
-        flatShading: true,
-      });
-      parts.push({ geometry: g, material });
+      const material = toLambert(src, opts.keepEmissive === false ? { ...opts, emissive: opts.emissive ?? 0 } : opts);
+      // `node` = nearest named ancestor (e.g. 'flame' child of a torch) for per-part handling
+      let n = o; while (n && !n.name && n.parent) n = n.parent;
+      parts.push({ geometry: g, material, node: n?.name || '' });
     });
+    // glTF extras on any node (e.g. { pointLight: {color, intensity, distance, decay, offset} })
+    let extras = null;
+    root.traverse((o) => { if (!extras && o.userData?.pointLight) extras = o.userData; });
+    parts.extras = extras || {};
+    parts.scale = k;
+    parts.height = size.y * k;
     return parts;
   } catch (err) {
     console.warn(`[assets] ${name}: failed to load ${url}`, err);
@@ -103,11 +128,10 @@ export async function loadScene(name, { height } = {}) {
     root.traverse((o) => {
       if (o.isMesh) {
         o.frustumCulled = false; // skinned bounds are unreliable; there are only a few of these
-        const src = o.material;
-        o.material = new THREE.MeshLambertMaterial({ map: src.map || null, color: src.color || 0xffffff, flatShading: true });
+        o.material = toLambert(o.material);
       }
     });
-    return { root, animations: gltf.animations || [] };
+    return { root, animations: gltf.animations || [], fromFile: true };
   } catch (err) {
     console.warn(`[assets] ${name}: failed to load ${url}`, err);
     return null;

@@ -28,6 +28,7 @@ URL flags:
 - `?nosw=1`: skip the service worker, for development
 - `?autostart=1`: skip the "Tap to begin" screen
 - `?llm=http`: use the HTTP LLM adapter (see *Companion chat*)
+- `?low=1`: low-end tier (1 real point light instead of 2)
 
 ## Controls
 
@@ -45,7 +46,7 @@ URL flags:
 *Flintseam Ridge*, and one piece is in the starting chamber. The fire burns down (75 s per piece of
 wood, up to 8 stacked), so keep feeding it. When it dies the fog slowly thickens (the Long Dark). This
 is never dangerous, just colder and moodier. Once the fire is lit, Biscuit trots over and sits by it,
-and Wren crouches beside it to warm her hands.
+and Wren sits down beside it to warm her hands.
 
 A floor tile costs 2 wood + 1 stone and snaps to a 2 m grid. Walls, roof and removal are planned for
 M1.
@@ -54,22 +55,76 @@ M1.
 
 - **Cave:** five named chambers from `story/LORE.md` (Lanternmouth, Flintseam Ridge, the Glowcap
   Galleries, Mossdrip Grotto, the Hushing Pools) joined by winding tunnels. There are glowcap
-  mushrooms, amethyst crystals, stalactites, a still pool, drifting motes, fog and robust collision
-  (a signed-distance field with gradient push-out).
+  mushrooms, stalactites, a still pool, drifting motes, fog and robust collision (a signed-distance
+  field with gradient push-out).
+- **Dressing** (art-director GLBs, `src/world/dressing.js`, placed per `story/LORE.md`):
+  - *Crystal clusters* (4 variants): densest on Flintseam Ridge's walls (14), a few in the Glowcap
+    Galleries (4), Mossdrip Grotto (3), around the Hushing Pools (5) and one at Lanternmouth. They
+    lean out from the rock and *hum* (emissive brightens and pulses) while a fire burns. The big
+    clusters carry the art's optional #B98CFF light as the lowest-priority emitter.
+  - *Moss* (3 clumps, 2 caps) where the air is damp: Mossdrip Grotto, the Glowcap Galleries, the
+    Hushing Pools and the damp tunnels, plus caps on the boulders there. Only a little at the dry
+    entrance.
+  - *Torches*: Wren's family were Lanternmouth's lamplighters and still keep the first stretch lit,
+    so 2 standing torches flank the path out toward Flintseam, and 6 lit wall torches line the first
+    part of the tunnels out of Lanternmouth. Deeper in, 3 of the Keepers' old sconces hang cold and
+    dark ("the waylamps went out, one after another").
+  - Static pieces are merged per material (one draw call per material for the whole cave). Torch
+    flames are instanced with a per-torch flicker, and all torch halos are one additive Points draw.
+- **Lighting** (STYLE_GUIDE §8, approved values):
+  - Hemisphere #3A5A80 / #0B0E14 at 0.9 before the first fire. It eases to 0.45 over about 3 s once
+    any fire is lit, and returns to 0.9 only when every fire is out.
+  - ACES tone mapping, exposure 1.1, sRGB output, max pixel ratio 1.5.
+  - **Light budget** (`src/render/lights.js`): a fixed pool of 2 real PointLights (1 with `?low=1`),
+    so the light count never changes and shaders never recompile. Campfires (priority 3), Wren's
+    lantern (2), torches (1) and big crystals (0.5) are *emitters*. Each frame the best-scoring ones
+    near the camera borrow a slot, with cross-fades on hand-over; priority only counts while the
+    camera is inside a light's range. Everything else is emissive-only (flames, halos, crystals).
+  - **Backlight fix:** Wren's and Biscuit's materials get a cool emissive lift (#16202C at 1.0) plus
+    a fresnel rim (#7FA3C8, power 2.5, strength 0.35) patched into Lambert with `onBeforeCompile`.
+    All rim materials share one shader program. There is no character-only light. Glowing parts
+    (lantern crystal, collar tag) keep their own emissive.
 - **Fire:**
   - Kenney campfire-pit model with flickering flame cones, particle flames and embers (capped at 30
     sparks), and a ground glow disc that shows the light radius.
-  - One shared PointLight per the style guide (#FF9A3C, 6–8, distance 10, decay 2).
+  - Each fire is a priority-3 light emitter (#FF9A3C, intensity 12, distance 10, decay 2) with a
+    ±10–15% flicker and 5 cm jitter. The fire is always the key light.
   - Procedural crackle audio.
   - Fuel bar in the HUD.
   - FogExp2 lerps between 0.04 (warm) and 0.075 (cold) based on fire level and distance.
-- **Biscuit:**
-  - Primitive boxer: fawn coat, white chest and socks, dark muzzle, floppy ears, collar tag.
-  - States: follow, idle, wander, sniff, lie down, go to the fire and sit, whine when the fire dies,
-    and petted (with hearts).
-- **Wren:**
-  - Kenney character (animated: idle, walk, crouch) with a waylamp lantern light.
+- **Biscuit** (art director's `biscuit.glb`, 656 tris, node pivots, no skinning):
+  - `src/entities/biscuit-rig.js` blends the baked poses (stand, sit, play bow, curled) and adds
+    procedural layers on top: a diagonal-gait walk cycle on the four leg nodes, body bounce and
+    breathing, ear flop (Z), panting jaw (X, 12°), head sniff and tilt, and the tail.
+  - Tail: carried at -35° when happy, -70° (high) when petted or play-bowing, +40° tucked when the
+    fire is out, and wagging ±25° on Y at 6–8 Hz.
+  - Poses: sits by the fire; curls up after about 25 s by a lit fire once Cam has been idle for 12 s
+    (any movement wakes him); play-bows when Cam comes back after wandering more than 9 m away, and
+    when petted.
+  - Other states: follow, idle, wander, sniff, lie down, whine when the fire dies, petted (hearts).
+  - The poses are baked from `biscuit-sit/-playbow/-curled.glb` into `src/entities/biscuit-poses.js`
+    by `tools/extract-biscuit-poses.mjs`, so only `biscuit.glb` ships. The old primitive boxer is
+    kept as the fallback.
+- **Wren** (art director's `wren.glb`, 1.7 m, node pivots, no skinning):
+  - `src/companion/wren-anim.js` animates her procedurally:
+    - walk cycle: legs, opposite arms, hip bob and sway, torso counter-twist
+    - idle: breathing and weight-shift sway; her head turns toward Cam
+    - warming at the fire: she sits down with her legs toward the flames and both hands out. Her
+      legs are single rigid pieces with no knee pivot, so a true crouch would look broken.
+    - lantern: re-parented to her right hand and swung from its handle by a damped spring driven by
+      her acceleration, turns and steps
+    - cloak sway; a hand-to-hood gesture whenever the hood changes
+  - **Hood rule:** the hood goes up when the fog is *thick* and she isn't in a lit fire's radius.
+    That's the case at the start, before the first fire, and whenever she's out in the Long Dark.
+    It comes down once she's been in a lit fire's warmth for 4 s, or when the fog is thin. There are
+    at least 10 s between changes, so it never flickers at the edge of the light. The `hood_up` node
+    is grafted from `wren-hood-up.glb` onto her head and toggled against `hood_down`.
+  - Her grandmother's waylamp is a priority-2 emitter (#E08A2E, 3.0, distance 6, decay 2) at the
+    lantern's glTF light offset. It fades out inside a lit campfire's radius.
   - Follows you, warms herself at the fire, and can be tapped to chat.
+  - glTF materials (MeshStandard) are converted to flat Lambert. Each animated pivot's colour
+    primitives are merged into one vertex-coloured mesh, so Wren and Biscuit cost about 25 draw
+    calls together instead of 44.
 - **Wren's ambient lines:**
   - The 32 fixed lines across 15 triggers from `story/COMPANION.md`. They are not LLM calls.
   - At least 45 s between any two lines, at least 3 min per trigger, and the last line never repeats.
@@ -89,7 +144,8 @@ M1.
 - **PWA:**
   - Manifest with fullscreen, landscape, icons and a maskable icon.
   - Apple meta tags with a black-translucent status bar and an apple-touch-icon.
-  - The service worker precaches every file, including the GLBs and their `Textures/`.
+  - The service worker precaches every file, including the GLBs and their `Textures/`. The version
+    is a content hash, so any change ships a new cache.
 - **iOS hardening:**
   - Safe-area insets.
   - No bounce, pinch zoom, double-tap zoom or pull-to-refresh: `touch-action:none`, gesturestart
@@ -154,30 +210,33 @@ game/
 ├── css/style.css         # HUD, MCPE-style buttons, chat panel, safe areas, no-zoom/bounce
 ├── icons/                # 192/512/maskable/apple-touch/favicon (tools/make-icons.py)
 ├── vendor/               # three.module.min.js r170 + GLTFLoader + BufferGeometryUtils (MIT)
-├── assets/models/        # Kenney CC0 GLBs actually used, each beside its Textures/
+├── assets/models/        # GLBs actually used: art-director characters/dog/crystals/moss/torches + Kenney CC0 props
 ├── src/
 │   ├── main.js           # bootstrap, game loop, interactions, triggers, session handling
 │   ├── config.js         # every tunable: render/fog/lights, player, fire, costs, names, LLM, asset paths
 │   ├── assets.js         # GLB loader with primitive fallback (drop-in art)
 │   ├── audio.js          # WebAudio crackle + blips, unlocked on first tap
-│   ├── world/            # cave.js (SDF cave, meshes, collision), decor.js, noise.js
+│   ├── render/           # lights.js (LightBudget + emitters), character-materials.js (lift + rim)
+│   ├── world/            # cave.js (SDF cave, meshes, collision), decor.js, dressing.js, noise.js
 │   ├── input/input.js    # multitouch joystick/look/buttons/taps + keyboard/pointer-lock
-│   ├── entities/         # player.js, items.js, puppy.js (Biscuit)
-│   ├── fire/campfire.js  # campfires, fuel, flames/embers, shared flickering light
+│   ├── entities/         # player.js, items.js, puppy.js + biscuit-rig.js + biscuit-poses.js (Biscuit)
+│   ├── fire/campfire.js  # campfires, fuel, flames/embers, flickering light emitters
 │   ├── build/shelter.js  # snap-grid build mode (floor tiles)
-│   ├── companion/        # wren.js, chat-ui.js, ambient.js, memory.js, context.js,
+│   ├── companion/        # wren.js, wren-anim.js, chat-ui.js, ambient.js, memory.js, context.js,
 │   │   │                 # story-data.js (GENERATED from ../story), llm/ adapters
 │   └── ui/hud.js         # inventory, hints, fuel bar, subtitles, toasts, FPS counter
-├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs
+├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs, screenshots.mjs,
+│                         # extract-biscuit-poses.mjs, pose-preview.html (dev pose viewer)
+├── screenshots/          # art-review phone screenshots (1688×780), not precached
 └── docs/                 # ROADMAP.md, screenshot.png
 ```
 
 ### Dropping in more art
 
-1. Copy the GLB **and its `Textures/` folder** into `assets/models/<pack>/`. Kenney GLBs reference
-   `Textures/colormap.png` relatively.
-2. Point the matching entry in `CONFIG.assets.models` at it. For example, set `puppy` to a boxer GLB
-   (with `sit`, `idle` and `walk` clips) to replace the primitive Biscuit.
+1. Copy the GLB into `assets/models/<pack>/`. Kenney GLBs also need their `Textures/` folder
+   beside them, because they reference `Textures/colormap.png` relatively.
+2. Point the matching entry in `CONFIG.assets.models` at it. Art-director props load with
+   `loadParts(name, { raw: true })`, which keeps their metres, base origin and +Z facing.
 3. Run `node tools/build-sw.mjs`.
 
 If a file is missing or fails to load, the game falls back to the built-in primitive, so it never
@@ -205,4 +264,9 @@ The test emulates an iPhone in landscape (844×390, touch). It:
 - chats with Wren and checks the memory key and the context block
 - confirms the service worker activates
 
-Screenshots go to `docs/screenshot.png` and `docs/test-output/`.
+Screenshots go to `docs/screenshot.png` and `docs/test-output/`. The perf block reports draw calls,
+triangles, real point lights and how many are active, the hemisphere intensity, and Wren's hood.
+Add `QUERY=low=1` to test the low tier.
+
+`node tools/screenshots.mjs` saves the art-review shots (1688×780) to `screenshots/`: the lit
+campfire with Wren and Biscuit, a crystal chamber, and a torchlit tunnel.

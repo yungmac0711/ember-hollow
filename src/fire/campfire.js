@@ -1,9 +1,11 @@
 // Campfires: stone ring + logs + flickering flame cones + particle flames/embers + a ground
-// glow decal that visualises the light radius. One shared PointLight follows the nearest lit
-// fire so the dynamic light budget never grows (and shaders never recompile).
+// glow decal that visualises the light radius. Each fire is a priority-3 light *emitter* in the
+// LightBudget (render/lights.js), so the real PointLight count never grows (no shader recompiles)
+// and the nearest lit fire always wins a slot. §8: #FF9A3C, intensity 12, distance 10, decay 2.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { lambert } from '../assets.js';
+import { Emitter } from '../render/lights.js';
 
 const FC = CONFIG.fire;
 
@@ -170,22 +172,23 @@ export class Campfire {
 }
 
 export class FireSystem {
-  constructor(scene, cave, pitParts = null) {
+  constructor(scene, cave, pitParts = null, budget = null) {
     this.scene = scene;
     this.cave = cave;
     this.pitParts = pitParts;
+    this.budget = budget;
     this.fires = [];
-    // Created up-front at intensity 0 so lighting count is constant from frame 1 (no shader recompiles).
-    this.light = new THREE.PointLight(FC.color, 0, FC.lightRadius, 2);
-    this.light.position.set(0, -50, 0);
-    scene.add(this.light);
   }
+
+  get anyLit() { return this.fires.some((f) => f.lit); }
 
   build(pos, wood) {
     const f = new Campfire(pos, this.cave, this.pitParts);
     f.addWood(wood);
     this.fires.push(f);
     this.scene.add(f.group);
+    f.emitter = new Emitter({ color: FC.color, intensity: 0, distance: FC.lightRadius, decay: 2, priority: 3 });
+    this.budget?.add(f.emitter);
     return f;
   }
 
@@ -199,16 +202,14 @@ export class FireSystem {
     return best;
   }
 
-  update(dt, playerPos) {
-    for (const f of this.fires) f.update(dt);
-    const f = this.nearest(playerPos, Infinity, true);
-    if (f) {
-      // ±10–15% flicker + 0.05 m jitter (style guide §3)
-      this.light.position.set(f.pos.x + (Math.random() - 0.5) * 0.05, f.pos.y + 0.9, f.pos.z + (Math.random() - 0.5) * 0.05);
-      this.light.distance = f.lightRadius;
-      this.light.intensity = FC.intensity * f.strength * (0.88 + (f.flicker - 0.85) * 1.6);
-    } else {
-      this.light.intensity = 0;
+  update(dt) {
+    for (const f of this.fires) {
+      f.update(dt);
+      const e = f.emitter;
+      if (!f.lit) { e.intensity = 0; continue; }
+      // ±10–15% flicker + 0.05 m jitter (style guide §3); the fire stays the scene's key light
+      e.pos.set(f.pos.x + (Math.random() - 0.5) * 0.05, f.pos.y + 0.9, f.pos.z + (Math.random() - 0.5) * 0.05);
+      e.intensity = FC.intensity * f.strength * (0.88 + (f.flicker - 0.85) * 1.6);
     }
   }
 }

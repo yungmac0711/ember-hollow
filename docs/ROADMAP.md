@@ -7,6 +7,10 @@
 - Gather wood, stone and flint; light a campfire; fuel burns down; refuel; fog thickens as the fire
   dies
 - Biscuit: follows, wanders, sits by the fire, can be petted
+- Art pass: the art director's Wren (procedural walk, idle, sit-warming, lantern swing, cloak, hood
+  rule) and Biscuit (procedural walk, tail, ears and jaw; sit, curled and play-bow poses); crystal,
+  moss and torch dressing per LORE; §8 lighting with a 2-slot light budget and the character
+  backlight lift
 - Wren: follows, has a lantern, 32 ambient lines, tap-to-chat through the stub LLM adapter, memory in
   localStorage
 - Stub build mode: 2 m snap-grid floor tiles
@@ -54,8 +58,7 @@
 
 ## M2: Biscuit AI polish
 
-- A real boxer model (art/) with idle, walk, run, sit, lie, sniff, wag and bark clips. Swap it in
-  through `CONFIG.assets.models.puppy`.
+- ✅ The real boxer model is in, driven by a procedural rig. Still to do: bark and run cycles.
 - Smarter pathing through tunnels: a navigation graph from the cave chambers instead of steering
   straight at the target.
 - Barks at points of interest (flint veins, crystals) and leads Cam to them. Zoomies when the fire
@@ -64,7 +67,11 @@
 
 ## M2: art and world polish
 
-- Swap more Kenney or art-director assets: wall rock kits, mushrooms, crystals, logs.
+- Swap more Kenney or art-director assets: wall rock kits, mushrooms, logs (crystals, moss and
+  torches are done).
+- Relight the Keepers' cold sconces: let Cam light them with a torch as a waylamp quest, so the
+  crystals wake. This fits LORE.
+- Merge dressing per chamber, if a bigger cave needs frustum culling to save triangles.
 - More chambers and a deeper level; let Wren's facts record discoveries.
 - Settings: look sensitivity, invert Y, quality tier (low tier is at most 60 draw calls and 80k
   triangles).

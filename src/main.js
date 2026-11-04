@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Cave } from './world/cave.js';
 import { buildDecor } from './world/decor.js';
+import { buildDressing } from './world/dressing.js';
+import { LightBudget } from './render/lights.js';
 import { Input } from './input/input.js';
 import { Player } from './entities/player.js';
 import { Items, ITEM_INFO } from './entities/items.js';
@@ -42,7 +44,12 @@ scene.background = new THREE.Color(R.background);
 scene.fog = new THREE.FogExp2(R.fogColor, R.fogCold);
 const camera = new THREE.PerspectiveCamera(R.fov, window.innerWidth / window.innerHeight, 0.05, R.farPlane);
 scene.add(camera);
-scene.add(new THREE.HemisphereLight(R.hemi.sky, R.hemi.ground, R.hemi.intensity));
+// §8 approved lighting: hemisphere 0.9 before the first fire, eases to 0.45 over ~3 s once any
+// fire is lit (the fire becomes the key light), back to 0.9 only when every fire is out.
+const hemi = new THREE.HemisphereLight(R.hemi.sky, R.hemi.ground, R.hemi.intensity);
+scene.add(hemi);
+// Fixed pool of real PointLights shared by campfires (priority 3), Wren's lantern (2) and torches (1)
+const budget = new LightBudget(scene, R.maxPointLights);
 
 let lastW = window.innerWidth;
 function onResize() {
@@ -82,7 +89,9 @@ window.__game = game; // debug/test handle
 async function init() {
   startMsg.textContent = 'Gathering kindling…';
   // Load Kenney GLBs in parallel (each falls back to primitives on failure)
-  const [decorBoulder, decorPillar, woodParts, stoneParts, flintParts, pitParts, floorParts, wrenScene, puppyModel] = await Promise.all([
+  const raw = { raw: true };
+  const [decorBoulder, decorPillar, woodParts, stoneParts, flintParts, pitParts, floorParts, wrenScene, puppyModel,
+    wrenHood, crys1, crys2, crys3, crys4, moss1, moss2, moss3, cap1, cap2, torchWall, torchStanding] = await Promise.all([
     loadParts('boulder', { size: 1.0, color: 0x3e4a57 }),
     loadParts('pillar', { size: 0.9, color: 0x2b3440 }),
     loadParts('stick', { size: 0.6 }),
@@ -90,13 +99,23 @@ async function init() {
     loadParts('stone', { size: 0.26, color: 0x3a3a46, emissive: 0x120804 }), // flint: dark, faint warm sheen
     loadParts('campfire', { size: 1.15 }),
     loadParts('floorPiece', { size: CONFIG.build.grid }),
-    loadScene('companion', { height: 1.62 }),
+    loadScene('companion'), // art-director Wren: 1.7 m, metres, origin at feet, facing +Z
     loadModel('puppy', buildPuppyPrimitive),
+    loadScene('companionHood'),
+    loadParts('crystal1', raw), loadParts('crystal2', raw), loadParts('crystal3', raw), loadParts('crystal4', raw),
+    loadParts('mossClump1', raw), loadParts('mossClump2', raw), loadParts('mossClump3', raw),
+    loadParts('mossCap1', raw), loadParts('mossCap2', raw),
+    loadParts('torchWall', raw), loadParts('torchStanding', raw),
   ]);
+  const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
 
-  const decor = buildDecor(scene, cave, seed, { boulder: decorBoulder, pillar: decorPillar });
+  const decor = buildDecor(scene, cave, seed, { boulder: decorBoulder, pillar: decorPillar, skipCrystals: crystalParts.length > 0 });
+  const dressing = buildDressing(scene, cave, seed, {
+    crystals: crystalParts, mossClumps: [moss1, moss2, moss3], mossCaps: [cap1, cap2], torchWall, torchStanding,
+  }, budget, { boulders: decor.boulders });
+  if (crystalParts.length) decor.crystals = dressing.crystals; // found_crystal trigger uses the real clusters
   const items = new Items(scene, cave, seed, { wood: woodParts, stone: stoneParts, flint: flintParts });
-  const fires = new FireSystem(scene, cave, pitParts);
+  const fires = new FireSystem(scene, cave, pitParts, budget);
   const build = new BuildSystem(scene, cave, floorParts);
 
   const spawn = new THREE.Vector3(lanternmouth.x + 0.5, 0, lanternmouth.z + 2);
@@ -105,10 +124,11 @@ async function init() {
   player.yaw = 0.35;
   player.extraFloor = (x, z) => build.heightAt(x, z);
 
-  const pModel = puppyModel.parts.legs ? puppyModel : { ...buildPuppyPrimitive(), animations: [] };
+  const pModel = puppyModel.fromFile || puppyModel.parts.legs ? puppyModel : { ...buildPuppyPrimitive(), animations: [] };
   const puppy = new Puppy(scene, cave, pModel, spawn.clone().add(new THREE.Vector3(-1.2, 0, -1.5)));
-  const wrenModel = wrenScene || { root: buildWrenPrimitive().root, animations: [] };
-  const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)));
+  const hoodUp = wrenHood?.root.getObjectByName('hood_up') || null;
+  const wrenModel = wrenScene ? { ...wrenScene, hoodUp } : { root: buildWrenPrimitive().root, animations: [] };
+  const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
 
   // ------------------------------------------------------------ companion brain
   const adapter = createAdapter(CONFIG.llm);
@@ -332,6 +352,7 @@ async function init() {
   // ------------------------------------------------------------ loop
   let last = performance.now();
   let running = false;
+  const _camPos = new THREE.Vector3();
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
@@ -356,10 +377,17 @@ async function init() {
     } else {
       player.update(0, input);
     }
-    fires.update(dt, player.pos);
+    fires.update(dt);
+    const anyLit = fires.anyLit;
+    // hemisphere ease (§8): 0.9 → 0.45 over ~3 s when any fire is lit; back only when all are out
+    const hTarget = anyLit ? R.hemi.litIntensity : R.hemi.intensity;
+    const hStep = (R.hemi.intensity - R.hemi.litIntensity) / R.hemi.easeSeconds * dt;
+    hemi.intensity += Math.max(-hStep, Math.min(hStep, hTarget - hemi.intensity));
     puppy.update(dt, player, fires);
-    wren.update(dt, player, fires, chat.open);
+    wren.update(dt, player, fires, chat.open, { fog: fogState() });
     decor.update(dt);
+    dressing.update(dt, { anyFireLit: anyLit });
+    budget.update(dt, camera.getWorldPosition(_camPos));
     updateFog(dt);
     updateHint();
     hud.update(dt, renderer);
@@ -367,7 +395,7 @@ async function init() {
     renderer.render(scene, camera);
   }
 
-  Object.assign(game, { scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, ready: true,
+  Object.assign(game, { hemi, budget, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, ready: true,
     start: () => begin() });
 
   // ------------------------------------------------------------ start screen

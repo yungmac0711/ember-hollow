@@ -7,7 +7,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP = new Set(['tools', 'docs', 'node_modules', '.git', 'sw.js', 'README.md', 'package.json', 'package-lock.json', '.gitignore', '.nojekyll']);
+const SKIP = new Set(['tools', 'docs', 'screenshots', 'node_modules', '.git', 'sw.js', 'README.md', 'package.json', 'package-lock.json', '.gitignore', '.nojekyll']);
 const files = [];
 (function walk(dir) {
   for (const name of readdirSync(dir).sort()) {
