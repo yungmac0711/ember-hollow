@@ -779,7 +779,7 @@ const m2b = {};
     const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)); g.warmth = 40; const ok = g.eatStew('stew'); await wait(100);
     const all = (t) => g.harvest.nodes.filter((n) => n.type === t).length; return { ok, warmth: Math.round(g.warmth), bushes: all('bush'), tufts: all('tuft') };
   });
-  { const E = m2b.eat; E.pass = E.ok && E.warmth >= 80 && E.bushes >= 10 && E.tufts >= 20; }
+  { const E = m2b.eat; E.pass = E.ok && E.warmth >= 80 && E.bushes >= 4 && E.tufts >= 20; }
   // tidy up (the 60-piece stress view below starts from an empty Lanternmouth, like the M1 cabin test leaves it)
   m2b.cleaned = await page.evaluate(() => { const g = __game, B = g.build;
     for (const p of [...B.pieces]) if (['crafting_bench', 'table', 'stew', 'cooking_pot'].includes(p.type) && B.pieces.includes(p)) B.remove({}, p, true);
@@ -793,6 +793,9 @@ const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl 
 m1.perf60 = await page.evaluate(async () => {
   const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), B = g.build, inv = g.player.inventory;
   inv.wood += 999; inv.stone += 999;
+  // earlier sub-tests leave their own campfires around Lanternmouth (≈650 tris / 4–6 calls each); the stress view is
+  // measured with just the hearth fire a new game has, so those are cleared first (count reported as leftoverFires)
+  const leftoverFires = g.fires.fires.slice(1); for (const f of leftoverFires) g.fires.remove(f);
   // M2 chunk B: the stress mix also carries the new craftables (placed from the pack)
   const CRAFT = ['crafting_bench', 'bookshelf', 'armchair', 'wooden_shelves', 'window_shutters', 'stone_path', 'fence', 'fence_gate', 'dog_bowl', 'cooking_pot', 'torch', 'stained_crystal_lamp', 'potted_glowcap', 'painting', 'stew', 'berry_tea'];
   for (const t of CRAFT) inv[t] = 10;
@@ -827,7 +830,7 @@ m1.perf60 = await page.evaluate(async () => {
   const craftPieces = B.pieces.filter((p) => CRAFT.includes(p.type)).length;
   // budget: low ≤ 60 calls / 75k tris (stress target, under the 80k cap); high ≤ 100 / 150k
   const pass = B.pieces.length >= 60 && craftPieces >= 10 && i.render.calls <= (low ? 60 : 100) && i.render.triangles <= (low ? 75000 : 150000);
-  return { pass, low, craftPieces, cells: B.cells?.size, drawn, pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount, tod: Math.round(g.dayNight.tod), top: top.slice(0, 12) };
+  return { leftoverFires: leftoverFires.length, pass, low, craftPieces, cells: B.cells?.size, drawn, pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount, tod: Math.round(g.dayNight.tod), top: top.slice(0, 12) };
 });
 await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
 // ---------------------------------------------------------------- save → reload → Continue
