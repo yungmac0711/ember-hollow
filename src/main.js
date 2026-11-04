@@ -189,7 +189,7 @@ async function init() {
   };
   player.colliders = colliders;
   harvest.canRespawn = (n) => !build.pieces.some((p) => Math.hypot(p.x - n.pos.x, p.z - n.pos.z) < 1.4);
-  build.blocked = (x, z, r) => cave.lakeAt(x, z, r * 0.6) || harvest.nodes.some((n) => n.alive && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
+  build.blocked = (x, z, r) => cave.lakeAt(x, z, r * 0.6) || harvest.nodes.some((n) => n.alive && !n.gather && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
 
   const pModel = puppyModel.fromFile || puppyModel.parts.legs ? puppyModel : { ...buildPuppyPrimitive(), animations: [] };
   const puppy = new Puppy(scene, cave, pModel, spawn.clone().add(new THREE.Vector3(-1.2, 0, -1.5)));

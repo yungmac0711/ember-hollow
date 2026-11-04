@@ -688,13 +688,116 @@ const m2a = {};
   m2a.pass = m2a.hotbar.pass && m2a.toggle.pass && m2a.light.pass && m2a.wren.pass && m2a.hud.pass && m2a.start?.has === 1 && m2a.start?.lit;
 }
 
+// ---------------------------------------------------------------- M2 chunk B: crafting bench, recipes, gathering, food
+const m2b = {};
+{
+  const tap = async (sel) => { const pt = await page.evaluate((sel) => { const e = document.querySelector(sel); if (!e || e.offsetParent === null) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+    if (!pt) return false; await touch('touchStart', [{ x: pt.x, y: pt.y, id: 12 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(250); return true; };
+  const tapXY = async (pt) => { await touch('touchStart', [{ x: pt.x, y: pt.y, id: 13 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(300); };
+  // stand in Lanternmouth with what a first session has gathered (wood 6 / stone 4 / flint 1 → bench + stone axe)
+  await page.evaluate(() => { const g = __game, c = g.cave.chambers[0], inv = g.player.inventory; g.player.pos.set(c.x, g.cave.floorAt(c.x, c.z), c.z);
+    Object.assign(inv, { wood: 10, stone: 4, flint: 1, mushroom: 4 }); g.invUI.setInventory(inv); });
+  // 1. hand crafting from the 🛠 button: the bench
+  const hand = { btn: await tap('#btn-craft') };
+  Object.assign(hand, await page.evaluate(() => ({ open: __game.craftUI.isOpen, station: __game.craftUI.station })));
+  hand.tapped = await tap('.craft-go[data-recipe="crafting_bench"]');
+  Object.assign(hand, await page.evaluate(() => ({ bench: __game.player.inventory.crafting_bench, stone: __game.player.inventory.stone })));
+  await tap('#craftui .panel-close');
+  hand.closed = await page.evaluate(() => !__game.craftUI.isOpen);
+  hand.pass = hand.open && hand.station === 'hand' && hand.bench === 1 && hand.stone === 2 && hand.closed;
+  m2b.hand = hand;
+  // 2. place the bench (from the pack), then tap it on screen to open its panel
+  const helpers = () => {
+    const g = __game, T = g.THREE, inv = g.player.inventory, B = g.build;
+    const fake = (x, z, yaw, pitch = -0.3) => ({ pos: new T.Vector3(x, g.cave.floorAt(x, z), z), forward: new T.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), pitch, yaw, inventory: inv });
+    window.__put = (type, x, z, yaw, pitch) => { if (!B.active) B.toggle(); B.select(type); B.update(fake(x, z, yaw, pitch), 0.016); const t = B.target; const r = t?.ok ? B.place(inv) : { ok: false, why: t?.why }; B.toggle(); return r; };
+    window.__faceOn = (p, dist = 2, pitch = -0.35) => { const P = g.player; const a = Math.atan2(P.pos.x - p.x, P.pos.z - p.z); const x = p.x + Math.sin(a) * dist, z = p.z + Math.cos(a) * dist;
+      P.pos.set(x, g.cave.floorAt(x, z), z); P.yaw = Math.atan2(-(p.x - x), -(p.z - z)); P.pitch = pitch; };
+    window.__screenOf = (p, dy = 0.5) => { const v = new T.Vector3(p.x, p.y + dy, p.z).project(g.camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight, hit: B.pickScreen((v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight, g.camera, g.player.pos)?.type }; };
+  };
+  await page.evaluate(helpers);
+  const bench = await page.evaluate(async () => {
+    const g = __game, c = g.cave.chambers[0], wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    let r = null; for (let a = 0; a < 24 && !r?.ok; a++) r = __put('crafting_bench', c.x + Math.cos(a) * 3, c.z + Math.sin(a) * 3, a * 0.6);
+    const p = g.build.find('crafting_bench'); if (!p) return { placed: false, why: r?.why };
+    __faceOn(p, 2.2); await wait(500);
+    return { placed: true, left: g.player.inventory.crafting_bench, pt: __screenOf(p, 0.6), btn: document.getElementById('btn-interact').textContent };
+  });
+  if (bench.pt?.hit === 'crafting_bench') await tapXY(bench.pt);
+  Object.assign(bench, await page.evaluate(() => ({ open: __game.craftUI.isOpen, station: __game.craftUI.station })));
+  bench.tabs = {};
+  for (const t of ['tools', 'building', 'cozy', 'food', 'light']) { await tap(`#craft-tabs [data-tab="${t}"]`); bench.tabs[t] = await page.evaluate((t) => __game.craftUI.tab === t ? document.querySelectorAll('#craft-list .craft-card').length : -1, t); }
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: OUT + 'test-output/m2b-bench.png' });
+  // stone axe (wood 2 · stone 2 · flint 1), then a table (wood 4)
+  await tap('#craft-tabs [data-tab="tools"]'); bench.axeTap = await tap('.craft-go[data-recipe="stone_axe"]');
+  Object.assign(bench, await page.evaluate(() => ({ axe: __game.player.inventory.stone_axe, mult: __game.toolMult('tree'), pickLocked: !!document.querySelector('.craft-card.locked[data-id="ember_pick"]') })));
+  await tap('#craft-tabs [data-tab="cozy"]'); bench.tableTap = await tap('.craft-go[data-recipe="table"]');
+  Object.assign(bench, await page.evaluate(() => ({ table: __game.player.inventory.table,
+    nookLocked: document.querySelector('.craft-card[data-id="potted_glowcap"] .craft-lock')?.textContent.trim() || '' })));
+  await tap('#craftui .panel-close');
+  bench.pass = bench.placed && bench.left === 0 && bench.pt?.hit === 'crafting_bench' && bench.open && bench.station === 'bench' && Object.values(bench.tabs).every((n) => n >= 4)
+    && bench.axe === 1 && bench.mult === 2 && bench.table === 1 && bench.pickLocked && /Snug Nook/i.test(bench.nookLocked);
+  m2b.bench = bench;
+  // 3. place the table, put a stew bowl on it (top_* anchors)
+  m2b.table = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), B = g.build, b = B.find('crafting_bench');
+    g.player.inventory.stew = 1;
+    let r = null; for (let a = 0; a < 24 && !r?.ok; a++) r = __put('table', b.x + Math.cos(a) * 3.5, b.z + Math.sin(a) * 3.5, a * 0.6);
+    const t = B.find('table'); if (!t) return { placed: false, why: r?.why };
+    let s = null; for (const pitch of [-0.5, -0.7, -0.9, -0.35]) { s = __put('stew', t.x + 1.3, t.z, Math.PI / 2, pitch); if (s.ok) break; }
+    const st = B.pieces.find((p) => p.type === 'stew');
+    return { placed: true, stewOk: !!s?.ok, why: s?.why, onTable: st?.parent === t.id, rise: st ? +(st.y - t.y).toFixed(2) : null, stewLeft: g.player.inventory.stew };
+  });
+  { const T = m2b.table; T.pass = T.placed && T.stewOk && T.onTable && Math.abs(T.rise - 0.75) < 0.1 && T.stewLeft === 0; }
+  // 4. cooking pot next to a lit fire → tap it → cook stew
+  const pot = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), B = g.build, inv = g.player.inventory, c = g.cave.chambers[0];
+    const fireR = (await import('./src/data/recipes.js')).RECIPES.find((r) => r.id === 'campfire');
+    let fire = null;
+    for (let r = 4; r < 14 && !fire; r += 1.5) for (let a = 0; a < 16 && !fire; a++) {
+      const x = c.x + Math.cos(a * 0.4) * r, z = c.z + Math.sin(a * 0.4) * r; g.player.pos.set(x, g.cave.floorAt(x, z), z);
+      inv.wood = Math.max(inv.wood, 3); inv.flint = Math.max(inv.flint, 1);
+      if (g.craft(fireR).ok) fire = window.__m2bFire = g.fires.fires.at(-1);
+    }
+    if (!fire) return { fire: false };
+    inv.cooking_pot = 1;
+    let r = null; for (let a = 0; a < 24 && !r?.ok; a++) { const yaw = a * 0.4; r = __put('cooking_pot', fire.pos.x + Math.sin(yaw) * 3.4, fire.pos.z + Math.cos(yaw) * 3.4, yaw); }
+    const p = B.find('cooking_pot'); if (!p) return { fire: true, lit: fire.lit, placed: false, why: r?.why };
+    __faceOn(p, 1.8, -0.45); await wait(500);
+    return { fire: true, lit: fire.lit, placed: true, dist: +Math.hypot(p.x - fire.pos.x, p.z - fire.pos.z).toFixed(2), label: g.pieceAction(p).label, pt: __screenOf(p, 0.35), mush: inv.mushroom };
+  });
+  if (pot.pt?.hit === 'cooking_pot') await tapXY(pot.pt);
+  Object.assign(pot, await page.evaluate(() => ({ open: __game.craftUI.isOpen, station: __game.craftUI.station, tab: __game.craftUI.tab, stew0: __game.player.inventory.stew || 0 })));
+  pot.cookTap = await tap('.craft-go[data-recipe="stew"]');
+  Object.assign(pot, await page.evaluate(() => ({ stew: __game.player.inventory.stew || 0, mushAfter: __game.player.inventory.mushroom })));
+  await tap('#craftui .panel-close');
+  pot.pass = pot.fire && pot.lit && pot.placed && pot.dist <= 2.6 && pot.label === 'Cook' && pot.pt?.hit === 'cooking_pot' && pot.open && pot.station === 'cooking_pot' && pot.tab === 'food' && pot.stew === pot.stew0 + 1 && pot.mushAfter === pot.mush - 2;
+  m2b.pot = pot;
+  // 5. eat it (food slot, second tap) → warmth up; berries + fiber from the clearing / Glowmere nodes
+  m2b.eat = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)); g.warmth = 40; const ok = g.eatStew('stew'); await wait(100);
+    const all = (t) => g.harvest.nodes.filter((n) => n.type === t).length; return { ok, warmth: Math.round(g.warmth), bushes: all('bush'), tufts: all('tuft') };
+  });
+  { const E = m2b.eat; E.pass = E.ok && E.warmth >= 80 && E.bushes >= 10 && E.tufts >= 20; }
+  // tidy up (the 60-piece stress view below starts from an empty Lanternmouth, like the M1 cabin test leaves it)
+  m2b.cleaned = await page.evaluate(() => { const g = __game, B = g.build;
+    for (const p of [...B.pieces]) if (['crafting_bench', 'table', 'stew', 'cooking_pot'].includes(p.type) && B.pieces.includes(p)) B.remove({}, p, true);
+    const f = g.fires.fires.at(-1); if (f && window.__m2bFire === f) g.fires.remove(f);
+    return !B.pieces.some((p) => ['crafting_bench', 'table', 'stew', 'cooking_pot'].includes(p.type)); });
+  m2b.pass = m2b.hand.pass && m2b.bench.pass && m2b.table.pass && m2b.pot.pass && m2b.eat.pass && m2b.cleaned;
+}
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
   const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), B = g.build, inv = g.player.inventory;
   inv.wood += 999; inv.stone += 999;
+  // M2 chunk B: the stress mix also carries the new craftables (placed from the pack)
+  const CRAFT = ['crafting_bench', 'bookshelf', 'armchair', 'wooden_shelves', 'window_shutters', 'stone_path', 'fence', 'fence_gate', 'dog_bowl', 'cooking_pot', 'torch', 'stained_crystal_lamp', 'potted_glowcap', 'painting', 'stew', 'berry_tea'];
+  for (const t of CRAFT) inv[t] = 10;
   const fake = (x, z, yaw) => ({ pos: new g.THREE.Vector3(x, g.cave.floorAt(x, z), z), forward: new g.THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), pitch: -0.3, yaw, inventory: inv });
-  const types = ['floor', 'wall', 'floor', 'window', 'roof', 'wall', 'lantern', 'floor', 'bedroll', 'table', 'chest', 'door', 'roof', 'wall', 'hearth'];
+  const types = ['floor', 'wall', 'crafting_bench', 'floor', 'window', 'window_shutters', 'roof', 'wall', 'wooden_shelves', 'lantern', 'floor', 'bedroll', 'table', 'stew', 'berry_tea', 'chest', 'door', 'armchair', 'roof', 'wall', 'painting', 'hearth', 'bookshelf', 'stone_path', 'fence', 'fence_gate', 'dog_bowl', 'cooking_pot', 'torch', 'stained_crystal_lamp', 'potted_glowcap'];
   B.toggle(); let k = 0, tries = 0;
   for (const ci of [0, 3, 1]) {
     const c = g.cave.chambers[ci];
@@ -713,7 +816,18 @@ m1.perf60 = await page.evaluate(async () => {
   const i = g.renderer.info;
   const top = []; g.scene.traverseVisible((o) => { if (o.isMesh || o.isPoints) { const n = (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position?.count || 0) / 3; top.push([o.name || o.parent?.name || o.type, Math.round(n * (o.isInstancedMesh ? o.count : 1))]); } });
   top.sort((a, b) => b[1] - a[1]);
-  return { pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount, tod: Math.round(g.dayNight.tod), top: top.slice(0, 12) };
+  // which objects drew this frame (one onBeforeRender per draw) → calls by group, for budget work
+  const byGroup = {}; const hooked = [];
+  g.scene.traverse((o) => { if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite)) return; const prev = o.onBeforeRender; hooked.push([o, prev]);
+    let gname = o.name || ''; for (let q = o.parent; q && !gname; q = q.parent) gname = q.name || ''; gname = (gname || o.type).replace(/[-:].*$/, '');
+    o.onBeforeRender = function (...a) { byGroup[gname] = (byGroup[gname] || 0) + 1; return prev.apply(this, a); }; });
+  await wait(300); for (const k of Object.keys(byGroup)) delete byGroup[k]; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const drawn = Object.entries(byGroup).sort((a, b) => b[1] - a[1]); for (const [o, prev] of hooked) o.onBeforeRender = prev;
+  const low = new URLSearchParams(location.search).get('low') === '1';
+  const craftPieces = B.pieces.filter((p) => CRAFT.includes(p.type)).length;
+  // budget: low ≤ 60 calls / 75k tris (stress target, under the 80k cap); high ≤ 100 / 150k
+  const pass = B.pieces.length >= 60 && craftPieces >= 10 && i.render.calls <= (low ? 60 : 100) && i.render.triangles <= (low ? 75000 : 150000);
+  return { pass, low, craftPieces, cells: B.cells?.size, drawn, pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount, tod: Math.round(g.dayNight.tod), top: top.slice(0, 12) };
 });
 await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
 // ---------------------------------------------------------------- save → reload → Continue
@@ -741,6 +855,6 @@ await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
 
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ title, m2, m2a, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, m2a, m2b, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !m2a.pass || !reload.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !m2a.pass || !m2b.pass || !reload.pass || !m1.perf60?.pass ? 1 : 0);
