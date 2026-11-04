@@ -76,7 +76,12 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
 
 #inv-flint .ico { color: #ffd27a; text-shadow: 0 0 6px #ff7a1a; }
-#subtitle { position: absolute; bottom: calc(34% + var(--sab)); left: 50%; transform: translateX(-50%); max-width: min(560px, 70vw); background: rgba(21,27,36,0.85); border: 1px solid rgba(224,138,46,0.5); border-radius: 14px; padding: 7px 12px; font-size: 15px; line-height: 1.35; color: #eadfc8; opacity: 0; transition: opacity 0.4s; text-align: center; }
+/* Wren's ambient / request / story lines (Art final check): #151B24 @ 85% panel, #EADFC8 text, inside the safe area */
+#subtitle { position: absolute; bottom: calc(34% + var(--sab)); left: calc(50% + (var(--sal) - var(--sar)) / 2); transform: translateX(-50%);
+  max-width: min(560px, 70vw, calc(100vw - 24px - var(--sal) - var(--sar))); width: max-content; box-sizing: border-box;
+  background: rgba(21, 27, 36, 0.85); border: 1px solid rgba(234, 223, 200, 0.18); border-radius: 14px; padding: 8px 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45); font-size: 15px; line-height: 1.35; color: #eadfc8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  opacity: 0; transition: opacity 0.4s; text-align: center; }
 #subtitle.show { opacity: 1; }
 #subtitle .who { color: #e08a2e; font-weight: 700; margin-right: 6px; }
 
@@ -171,7 +176,7 @@ body.on-title #hud > *:not(#fps), body.on-title #hotbar, body.on-title #palette 
 #warmth .fill { height: 100%; width: 80%; background: linear-gradient(90deg, #7fb6e8, #ffb35c 55%, #ff7a2a); transition: width 0.6s; }
 #warmth.cold .fill { background: #9fd0ff; }
 #warmth.cold { box-shadow: 0 0 0 1px rgba(159,208,255,0.6); }
-#frost { position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 1.5s;
+#frost { position: fixed; inset: 0; z-index: 1; /* under the HUD so the cold vignette never washes out Wren's lines */ pointer-events: none; opacity: 0; transition: opacity 1.5s;
   background: radial-gradient(ellipse at center, rgba(180,215,255,0) 55%, rgba(190,222,255,0.28) 78%, rgba(225,240,255,0.6) 100%); }
 #fade { position: fixed; inset: 0; z-index: 9; pointer-events: none; background: #05070b; opacity: 0; transition: opacity 1.4s ease; }
 #fade.on { opacity: 1; pointer-events: auto; }
