@@ -106,7 +106,7 @@ export const CONFIG = {
     rain:  { hemi: 0.80, sky: 0x33466b, ground: 0x1e2838, moon: 0.45, fog: 0x34405a },
     easeSec: 4,
   },
-  build: { grid: 2, wallHeight: 2.1, reach: 2.2, cluster: 12, smallCull: 25, farCull: 46 }, // M2B: idle batch split into cluster×cluster m cells (frustum culled); small decor hidden past smallCull, everything past farCull (fog) // piece costs live in src/build/pieces.js
+  build: { grid: 2, wallHeight: 2.1, reach: 2.2, cluster: 12, smallCull: 25, farCull: 46 }, // M2B: idle batch = one mesh per proximity cluster (radius `cluster` m, frustum culled); high tier keeps small decor apart and hides it past smallCull (low folds it in); everything past farCull (fog) // piece costs live in src/build/pieces.js
   playerName: 'Cam',
   companion: {
     name: 'Wren', // persona + lines come from /story via src/companion/story-data.js (npm run sync-story)
