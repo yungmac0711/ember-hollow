@@ -30,7 +30,7 @@ const CACHE = 'ember-hollow-' + VERSION;
 const PRECACHE = ${JSON.stringify(list, null, 2)};
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE.map((u) => new Request(u, { cache: 'reload' }))) /* bypass the HTTP cache so a new version never precaches stale files */).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

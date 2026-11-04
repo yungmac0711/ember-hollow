@@ -537,6 +537,24 @@ init().catch((e) => {
 });
 
 // ---------------------------------------------------------------- PWA service worker
+// Phones keep a home-screen app alive for days, so pick up deploys promptly: check for a new SW
+// whenever the app comes back to the foreground, and when a new SW takes control reload ONCE
+// (guarded: only if a controller already existed, i.e. this isn't the very first install, and
+// never twice in a row).
 if ('serviceWorker' in navigator && !CONFIG.debug.noSW) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sw]', e)));
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    try { if (sessionStorage.getItem('ember_hollow.swreload') === '1') return; sessionStorage.setItem('ember_hollow.swreload', '1'); } catch (_) { /* ignore */ }
+    reloading = true;
+    location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch((e) => console.warn('[sw]', e));
+    // a clean load after the reload clears the guard for the next deploy
+    setTimeout(() => { try { sessionStorage.removeItem('ember_hollow.swreload'); } catch (_) { /* ignore */ } }, 10000);
+  });
 }

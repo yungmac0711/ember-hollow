@@ -1,6 +1,7 @@
 // M1 inventory UI: thumb-friendly hotbar (6 resource slots + pack button), the build-mode piece
 // palette (scrolls sideways), the pack panel, the storage-chest panel and the hold progress ring.
 import { ITEM_INFO } from '../entities/items.js';
+import { onTap } from './tap.js';
 import { PIECES, PIECE_ORDER, costText, iconHtml } from '../build/pieces.js';
 
 const $ = (id) => document.getElementById(id);
@@ -41,13 +42,16 @@ export class InventoryUI {
       const b = document.createElement('button');
       b.className = 'slot has-cost'; b.dataset.piece = t; b.title = `${PIECES[t].name} · ${costText(PIECES[t].cost)} (${(n + 1) % 10})`;
       b.innerHTML = `${iconHtml(PIECES[t].icon)}<span class="c">${shortCost(PIECES[t].cost)}</span>`;
-      b.addEventListener('click', (e) => { stop(e); onSelectPiece(t); });
       this.palette.appendChild(b); this.pieceBtns[t] = b;
     });
+    // one delegated tap handler on the (sideways-scrolling) palette: pointerup + movement slop,
+    // so a swipe scrolls and a tap selects (iOS drops 'click' here — see tap.js)
+    onTap(this.palette, (t) => onSelectPiece(t), (el) => el.closest?.('.slot')?.dataset.piece || null);
     // panels
-    for (const el of document.querySelectorAll('.panel-close')) el.addEventListener('click', () => this.close());
-    this.chestPack.addEventListener('click', (e) => { const k = e.target.closest('.slot')?.dataset.kind; if (k) onStore(k); });
-    this.chestStore.addEventListener('click', (e) => { const k = e.target.closest('.slot')?.dataset.kind; if (k) onTake(k); });
+    for (const el of document.querySelectorAll('.panel-close')) onTap(el, () => this.close());
+    const kindOf = (el) => el.closest?.('.slot')?.dataset.kind || null;
+    onTap(this.chestPack, (k) => onStore(k), kindOf);
+    onTap(this.chestStore, (k) => onTake(k), kindOf);
   }
 
   select(kind) {

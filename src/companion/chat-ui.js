@@ -1,6 +1,7 @@
 // Mobile-friendly chat panel. Keeps the input visible above the iOS/Android soft keyboard with the
 // visualViewport API (the canvas is never resized while typing — see main.js resize guard).
 import { CONFIG } from '../config.js';
+import { onTap } from '../ui/tap.js';
 import { SYSTEM_PROMPT } from './story-data.js';
 import { buildContextBlock } from './context.js';
 
@@ -23,7 +24,7 @@ export class ChatUI {
     this.input = document.getElementById('chat-input');
     this.el.querySelector('.chat-name').textContent = CONFIG.companion.name;
     this.open = false; this.busy = false;
-    document.getElementById('chat-close').addEventListener('click', () => this.hide());
+    onTap(document.getElementById('chat-close'), () => this.hide());
     this.form.addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
     this.input.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.hide(); e.stopPropagation(); });
     // keep pointer events inside the panel from steering the camera

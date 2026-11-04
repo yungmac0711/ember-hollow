@@ -250,6 +250,47 @@ await page.evaluate(async () => { // frame the little build for an orientation c
 });
 await page.screenshot({ path: OUT + 'test-output/05-build.png' });
 
+// 4b. REAL touch on the build palette / buttons / panel close (hotfix): CDP touch events, with
+// trusted 'click' events swallowed to mimic iOS Safari dropping synthesized clicks on
+// touch-action:none UI. A tap must change the selected piece; a sideways swipe must scroll the
+// palette without selecting.
+m1.touchUI = await (async () => {
+  const out = {};
+  await page.evaluate(() => { window.__dropClicks = (e) => { if (e.isTrusted && e.detail > 0) { e.stopImmediatePropagation(); e.preventDefault(); } }; window.addEventListener('click', window.__dropClicks, true); });
+  const center = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; el.scrollIntoView({ inline: 'center', block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; }, sel);
+  const tap = async (pt) => { await touch('touchStart', [{ x: pt.x, y: pt.y, id: 7 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(200); };
+  const bb = await center('#btn-build'); await tap(bb);
+  out.buildOn = await page.evaluate(() => __game.build.active);
+  out.taps = [];
+  for (const t of ['wall', 'roof', 'chest', 'floor']) {
+    const pt = await center(`#palette [data-piece="${t}"]`);
+    if (!pt) { out.taps.push({ t, missing: true }); continue; }
+    await tap(pt);
+    out.taps.push({ t, selected: await page.evaluate(() => __game.build.selected) });
+  }
+  out.tapSelects = out.taps.every((x) => x.selected === x.t);
+  // swipe: scroll the palette sideways, selection must not change
+  const sel0 = await page.evaluate(() => __game.build.selected);
+  await page.evaluate(() => { document.getElementById('palette').scrollLeft = 0; });
+  const pr = await page.evaluate(() => { const r = document.getElementById('palette').getBoundingClientRect(); return { x: r.left + r.width * 0.7, y: r.top + r.height / 2, sw: document.getElementById('palette').scrollWidth, cw: document.getElementById('palette').clientWidth }; });
+  await touch('touchStart', [{ x: pr.x, y: pr.y, id: 8 }]);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', [{ x: pr.x - i * 14, y: pr.y, id: 8 }]); await page.waitForTimeout(16); }
+  await touch('touchEnd', []); await page.waitForTimeout(400);
+  out.swipe = await page.evaluate((sel0) => ({ scrollLeft: Math.round(document.getElementById('palette').scrollLeft), selectionKept: __game.build.selected === sel0 }), sel0);
+  out.swipe.scrollable = pr.sw > pr.cw;
+  out.swipeOk = out.swipe.selectionKept && (!out.swipe.scrollable || out.swipe.scrollLeft > 0);
+  await tap(await center('#btn-build'));
+  out.buildOff = await page.evaluate(() => !__game.build.active);
+  // pack button + panel close (✕) by touch
+  await tap(await center('#btn-bag'));
+  out.bagOpened = await page.evaluate(() => !document.getElementById('bag').classList.contains('hidden'));
+  await tap(await center('#bag .panel-close'));
+  out.bagClosed = await page.evaluate(() => document.getElementById('bag').classList.contains('hidden'));
+  await page.evaluate(() => window.removeEventListener('click', window.__dropClicks, true));
+  out.pass = out.buildOn && out.tapSelects && out.swipeOk && out.buildOff && out.bagOpened && out.bagClosed;
+  return out;
+})();
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
@@ -280,4 +321,4 @@ const sw = await page.evaluate(async () => { const r = await navigator.serviceWo
 
 console.log(JSON.stringify({ moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass ? 1 : 0);
