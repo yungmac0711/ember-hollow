@@ -4,7 +4,12 @@ const params = new URLSearchParams(location.search);
 export const SETTINGS_KEY = 'ember_hollow.settings';
 const tierPref = (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').tier || 'auto'; } catch { return 'auto'; } })();
 const autoLow = () => (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory || 8) <= 2;
-export const TIER = { pref: tierPref, low: params.get('low') === '1' || tierPref === 'low' || (tierPref === 'auto' && autoLow()) };
+/** Low tier for a Settings choice ('auto' | 'low' | 'high'); ?low=1 always wins. */
+export const tierLow = (pref) => params.get('low') === '1' || pref === 'low' || (pref === 'auto' && autoLow());
+// TIER.low = the tier the game LOADED with (light pool, scatter counts); TIER.live = what Settings has
+// applied since (pixel ratio + cull distances switch live, polish pass).
+export const TIER = { pref: tierPref, low: tierLow(tierPref) };
+TIER.live = TIER.low;
 
 export const CONFIG = {
   debug: {
@@ -17,7 +22,9 @@ export const CONFIG = {
   // Lighting follows art/STYLE_GUIDE.md §8 "Approved M0 lighting" (signed off Nov 3, 2026), which
   // overrides §3 where they differ. Fog values follow §3.
   render: {
-    maxPixelRatio: TIER.low ? 1.25 : 1.5, // chunk D: the low tier also renders a little softer
+    maxPixelRatio: TIER.low ? 1.25 : 1.5, // chunk D: the low tier also renders a little softer (applies live)
+    pixelRatio: { low: 1.25, high: 1.5 },
+    cullScale: { low: 0.93, high: 1 }, // polish: low tier draws instanced decor/dressing/surface 7% shorter (28 → 26 m; applies live)
     fov: 70,
     background: 0x0e1117,
     fogColor: 0x3a4656,

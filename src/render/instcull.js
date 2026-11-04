@@ -8,7 +8,9 @@ import * as THREE from 'three';
 const _fr = new THREE.Frustum(), _sph = new THREE.Sphere(), _m = new THREE.Matrix4(), _c = new THREE.Vector3(), _s = new THREE.Vector3(), _q = new THREE.Quaternion();
 
 export class InstanceCuller {
-  constructor() { this.sets = []; this._t = 1; }
+  constructor() { this.sets = []; this._t = 1; this.scale = 1; }
+  /** Polish: scale every cull distance (graphics tier, applied live). */
+  setScale(k) { this.scale = k; for (const r of this.sets) r.d2 = (r.d0 * k) ** 2; this._t = 1; }
 
   add(im, maxDist = 32) {
     if (!im?.isInstancedMesh || im.userData.instCull) return;
@@ -21,7 +23,7 @@ export class InstanceCuller {
       const p = bs.center.clone().applyMatrix4(_m);
       sph.set([p.x, p.y, p.z, bs.radius * Math.max(_s.x, _s.y, _s.z) + 0.05], i * 4);
     }
-    this.sets.push({ im, n, sph, mat: im.instanceMatrix.array.slice(0, n * 16), col: im.instanceColor ? im.instanceColor.array.slice(0, n * 3) : null, d2: maxDist * maxDist });
+    this.sets.push({ im, n, sph, mat: im.instanceMatrix.array.slice(0, n * 16), col: im.instanceColor ? im.instanceColor.array.slice(0, n * 3) : null, d0: maxDist, d2: (maxDist * this.scale) ** 2 });
   }
 
   addAll(root, maxDist) { root.traverse((o) => { if (o.isInstancedMesh && o.frustumCulled !== false) this.add(o, maxDist); }); }

@@ -1,11 +1,12 @@
 // Chunk D: Settings (title + pause menus). Everything is saved to localStorage under SETTINGS_KEY.
-// Volumes / look sensitivity / invert-Y apply live; the graphics tier is read by config.js at load,
-// so changing it offers a "Restart to apply" (saves the game first, then reloads).
+// Volumes / look sensitivity / invert-Y / Show FPS apply live. The graphics tier applies its pixel
+// ratio and cull distances live (polish pass); the light pool size and scatter counts are fixed at
+// load, so a changed tier still offers "Restart to apply" (saves the game first, then reloads).
 // iOS: buttons use onTap (never click); sliders use the native 'input' event.
-import { SETTINGS_KEY, TIER } from '../config.js';
+import { SETTINGS_KEY, TIER, tierLow } from '../config.js';
 import { onTap } from './tap.js';
 
-export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto' };
+export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto', showFps: false };
 
 export function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
@@ -35,13 +36,17 @@ export class SettingsPanel {
     const showInv = () => { inv.setAttribute('aria-pressed', String(!!this.s.invertY)); inv.textContent = this.s.invertY ? 'On' : 'Off'; };
     showInv();
     onTap(inv, () => { this.s.invertY = !this.s.invertY; showInv(); this._changed(); });
+    const fps = $('set-fps');
+    const showFps = () => { fps.setAttribute('aria-pressed', String(!!this.s.showFps)); fps.textContent = this.s.showFps ? 'On' : 'Off'; };
+    showFps();
+    onTap(fps, () => { this.s.showFps = !this.s.showFps; showFps(); this._changed(); });
     const seg = $('set-tier');
     const showTier = () => {
       for (const b of seg.children) b.classList.toggle('on', b.dataset.tier === this.s.tier);
-      const pending = this.s.tier !== TIER.pref;
+      const low = tierLow(this.s.tier), pending = low !== TIER.low;
       this.reloadBtn.classList.toggle('hidden', !pending);
-      this.note.textContent = pending ? 'Graphics change applies after a restart (your game is saved first).'
-        : `Graphics: ${TIER.low ? 'low' : 'high'}${this.s.tier === 'auto' ? ' (auto)' : ''}`;
+      this.note.textContent = pending ? 'Resolution and draw distance changed now. Light pool: applies on restart (your game is saved first).'
+        : `Graphics: ${low ? 'low' : 'high'}${this.s.tier === 'auto' ? ' (auto)' : ''}`;
     };
     showTier();
     onTap(seg, (b) => { this.s.tier = b.dataset.tier; showTier(); this._changed(); }, (t) => t.closest?.('[data-tier]'));

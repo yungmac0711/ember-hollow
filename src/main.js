@@ -2,7 +2,7 @@
 // Chunk B: save/load, title screen, Biscuit v2 (pet/bark/fetch/dig/zoomies), Wren's reply bank, ambient
 // lines from story data, requests, lore notes + journal, decor and keepsakes.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
+import { CONFIG, TIER, tierLow } from './config.js';
 import { Cave } from './world/cave.js';
 import { buildDecor } from './world/decor.js';
 import { InstanceCuller } from './render/instcull.js';
@@ -460,8 +460,21 @@ async function init() {
   onTap(document.getElementById('pause-close'), () => setPaused(false));
   // Chunk D: settings (title + pause), saved to localStorage; see src/ui/settings.js
   player.baseFov = R.fov;
+  let settingsApplied = false;
   const settings = new SettingsPanel({
-    apply: (st) => { audio.setVolumes({ master: st.master, music: st.music, effects: st.effects }); input.sens = st.sens; player.invertY = !!st.invertY; },
+    apply: (st) => {
+      audio.setVolumes({ master: st.master, music: st.music, effects: st.effects }); input.sens = st.sens; player.invertY = !!st.invertY;
+      hud.setFps(!!st.showFps || CONFIG.debug.fps);
+      // polish: the graphics tier applies its pixel ratio + cull distances live (light pool: on restart)
+      const low = tierLow(st.tier);
+      if (low !== TIER.live || !settingsApplied) {
+        TIER.live = low; R.maxPixelRatio = R.pixelRatio[low ? 'low' : 'high'];
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, R.maxPixelRatio));
+        renderer.setSize(window.innerWidth, window.innerHeight, false);
+        instCull.setScale(R.cullScale[low ? 'low' : 'high']); instCull.update(0, camera, true);
+      }
+      settingsApplied = true;
+    },
     beforeReload: () => { if (running) saveNow('settings'); },
     onClose: () => { if (paused) pauseEl.classList.remove('hidden'); },
   });
