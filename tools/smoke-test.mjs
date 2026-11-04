@@ -734,10 +734,10 @@ const m2b = {};
   Object.assign(bench, await page.evaluate(() => ({ axe: __game.player.inventory.stone_axe, mult: __game.toolMult('tree'), pickLocked: !!document.querySelector('.craft-card.locked[data-id="ember_pick"]') })));
   await tap('#craft-tabs [data-tab="cozy"]'); bench.tableTap = await tap('.craft-go[data-recipe="table"]');
   Object.assign(bench, await page.evaluate(() => ({ table: __game.player.inventory.table,
-    nookLocked: document.querySelector('.craft-card[data-id="potted_glowcap"] .craft-lock')?.textContent.trim() || '' })));
+    nookLocked: document.querySelector('.craft-card[data-id="potted_glowcap"] .craft-lock')?.textContent.trim() || '', cozyBest: __game.journal.cozyBest })));
   await tap('#craftui .panel-close');
   bench.pass = bench.placed && bench.left === 0 && bench.pt?.hit === 'crafting_bench' && bench.open && bench.station === 'bench' && Object.values(bench.tabs).every((n) => n >= 4)
-    && bench.axe === 1 && bench.mult === 2 && bench.table === 1 && bench.pickLocked && /Snug Nook/i.test(bench.nookLocked);
+    && bench.axe === 1 && bench.mult === 2 && bench.table === 1 && bench.pickLocked && (bench.cozyBest >= 1 ? !bench.nookLocked : /Snug Nook/i.test(bench.nookLocked)); // M2C: real coziness gating
   m2b.bench = bench;
   // 3. place the table, put a stew bowl on it (top_* anchors)
   m2b.table = await page.evaluate(async () => {
@@ -786,6 +786,144 @@ const m2b = {};
     const f = g.fires.fires.at(-1); if (f && window.__m2bFire === f) g.fires.remove(f);
     return !B.pieces.some((p) => ['crafting_bench', 'table', 'stew', 'cooking_pot'].includes(p.type)); });
   m2b.pass = m2b.hand.pass && m2b.bench.pass && m2b.table.pass && m2b.pot.pass && m2b.eat.pass && m2b.cleaned;
+}
+
+// ---------------------------------------------------------------- M2 chunk C: Hearth Journal, coziness, lines, hints
+// The journal is reset here (earlier sections already completed Ch1 through the normal hooks), then
+// Ch1 goals are done again with REAL touch: craft a campfire + bench from 🛠, the stone axe at the
+// bench, pet Biscuit by tapping him; the journal is opened from the 📖 button. Then a coziness tier-up
+// (table by the fire → Snug Nook → Potted Glowcap unlocked), m2_lines cooldowns, and the hints card.
+const m2c = {};
+{
+  const tap = async (sel) => { const pt = await page.evaluate((sel) => { const e = document.querySelector(sel); if (!e || e.offsetParent === null) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+    if (!pt) return false; await touch('touchStart', [{ x: pt.x, y: pt.y, id: 14 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(250); return true; };
+  const tapXY = async (pt) => { await touch('touchStart', [{ x: pt.x, y: pt.y, id: 15 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(300); };
+  // 0. a fresh journal + a clear spot for a fire in Lanternmouth
+  const setup = await page.evaluate(() => {
+    const g = __game, c = g.cave.chambers[0], inv = g.player.inventory;
+    g.journal.reset(); g.hud._q.length = 0; g.hud._prioT = 0;
+    Object.assign(inv, { wood: 20, stone: 8, flint: 3, mushroom: 4 }); inv.crafting_bench = 0; inv.stone_axe = 0; g.invUI.setInventory(inv);
+    let spot = null;
+    for (let r = 4; r < 14 && !spot; r += 1.5) for (let a = 0; a < 16 && !spot; a++) {
+      const x = c.x + Math.cos(a * 0.4) * r, z = c.z + Math.sin(a * 0.4) * r; g.player.pos.set(x, g.cave.floorAt(x, z), z);
+      if (g.canBuildFireHere() && !g.fires.nearest(g.player.pos, 12)) spot = { x, z };
+    }
+    g.progressTick();
+    return { spot: !!spot, done: g.journal.done.size, ch: g.journal.ch };
+  });
+  // 1. campfire + bench from the 🛠 hand panel (real taps)
+  await tap('#btn-craft'); await tap('#craft-tabs [data-tab="light"]');
+  const ch1 = { fireTap: await tap('.craft-go[data-recipe="campfire"]') };
+  await page.waitForTimeout(300);
+  if (!(await page.evaluate(() => __game.craftUI.isOpen))) await tap('#btn-craft');
+  await tap('#craft-tabs [data-tab="building"]'); ch1.benchTap = await tap('.craft-go[data-recipe="crafting_bench"]');
+  await tap('#craftui .panel-close');
+  Object.assign(ch1, await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)); const fire = window.__m2cFire = g.fires.fires.at(-1);
+    let r = null; for (let a = 0; a < 24 && !r?.ok; a++) r = __put('crafting_bench', fire.pos.x + Math.cos(a) * 3, fire.pos.z + Math.sin(a) * 3, a * 0.6);
+    const p = g.build.find('crafting_bench'); __faceOn(p, 2.2); await wait(700);
+    return { benchPlaced: !!r?.ok, pt: __screenOf(p, 0.6), cozyPre: g.cozy.score, tierPre: g.journal.cozyBest };
+  }));
+  // 2. stone axe at the bench (tap the bench on screen → Tools → Stone Axe)
+  if (ch1.pt?.hit === 'crafting_bench') await tapXY(ch1.pt);
+  await tap('#craft-tabs [data-tab="tools"]'); ch1.axeTap = await tap('.craft-go[data-recipe="stone_axe"]');
+  await tap('#craftui .panel-close');
+  // 3. pet Biscuit by tapping him
+  const pup = await page.evaluate(async () => {
+    const g = __game, P = g.player, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    P.yaw += Math.PI; // turn away from the bench so the tap can't land on it
+    g.wren.pos.set(P.pos.x + Math.sin(P.yaw) * 3, P.pos.y, P.pos.z + Math.cos(P.yaw) * 3); // and Wren behind Cam
+    const T = g.THREE, rc = new T.Raycaster(); let v = null, hit = null;
+    for (const pitch of [-0.3, -0.2, -0.4, -0.1, -0.5]) { // look down until Biscuit sits mid-screen (clear of the hotbar) and a ray hits him
+      P.pitch = pitch; await wait(150);
+      const fw = g.camera.getWorldDirection(new T.Vector3()); fw.y = 0; fw.normalize(); const cp = g.camera.getWorldPosition(new T.Vector3());
+      const x = cp.x + fw.x * 3, z = cp.z + fw.z * 3; g.puppy.pos.set(x, g.cave.floorAt(x, z), z);
+      await wait(120);
+      v = new T.Vector3(g.puppy.pos.x, g.puppy.pos.y + 0.3, g.puppy.pos.z).project(g.camera); rc.setFromCamera(new T.Vector2(v.x, v.y), g.camera);
+      hit = rc.intersectObject(g.puppy.root, true)[0];
+      if (hit && v.y > -0.4 && v.y < 0.6) break;
+    }
+    window.__m2cPet = 0; const op = g.puppy.pet.bind(g.puppy); g.puppy.pet = (...a) => { __m2cPet++; return op(...a); }; window.__m2cPetOrig = op;
+    window.__m2cTrig = []; const A = g.ambient, orig = A.trigger.bind(A); A.trigger = (n, o) => { __m2cTrig.push(n); return orig(n, o); }; window.__m2cTrigOrig = orig;
+    const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight, el = document.elementFromPoint(sx, sy);
+    return { x: sx, y: sy, el: el?.id || el?.className || el?.tagName, ray: !!hit };
+  });
+  await tapXY(pup);
+  await page.waitForTimeout(400);
+  // 4. open the journal from the 📖 button: Ch1 page with checkmarks
+  ch1.pup = { ...pup, pets: await page.evaluate(() => __m2cPet) }; ch1.journalBtn = await tap('#btn-journal');
+  await page.waitForTimeout(500);
+  Object.assign(ch1, await page.evaluate(() => ({ open: __game.journalUI.isOpen, page: __game.journalUI.page, done: [...__game.journal.done],
+    rows: document.querySelectorAll('#journal-body .jgoal').length, checks: [...document.querySelectorAll('#journal-body .jgoal.done')].map((e) => e.dataset.goal),
+    prio: __game.hud.prioLog.slice(-6), opened: __m2cTrig.includes('journal_opened') })));
+  await page.evaluate(() => { __game.ambient.trigger = window.__m2cTrigOrig; __game.puppy.pet = window.__m2cPetOrig; });
+  await page.screenshot({ path: OUT + 'test-output/m2c-journal.png' });
+  await tap('#journalui .panel-close');
+  ch1.closed = await page.evaluate(() => !__game.journalUI.isOpen);
+  ch1.pass = setup.spot && ch1.fireTap && ch1.benchTap && ch1.benchPlaced && ch1.axeTap && ch1.open && ch1.closed && ch1.rows === 5
+    && ['g1_fire', 'g1_bench', 'g1_stone_axe', 'g1_pet'].every((id) => ch1.checks.includes(id)) && ch1.prio.some((t) => /Light a campfire/.test(t)) && ch1.opened;
+  m2c.ch1 = ch1;
+  // 5. coziness tier-up: table by the fire → Snug Nook (≥15) → Potted Glowcap unlocked at the bench
+  const tier = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fire = window.__m2cFire, inv = g.player.inventory;
+    const before = { score: g.cozy.score, best: g.journal.cozyBest, lock: g.journal.unlockState({ id: 'potted_glowcap', station: 'bench', unlock: 'coziness:snug_nook' }) };
+    inv.table = 1; g.hud._q.length = 0; g.hud._prioT = 0;
+    let r = null; for (let a = 0; a < 24 && !r?.ok; a++) r = __put('table', fire.pos.x + Math.cos(a + 0.3) * 4, fire.pos.z + Math.sin(a + 0.3) * 4, a * 0.6);
+    g.progressTick(); await wait(400);
+    return { before, placed: !!r?.ok, after: { score: g.cozy.score, tier: g.cozy.tier, scope: g.cozy.scope, best: g.journal.cozyBest }, last: g.lastTierUp, toast: g.hud.lastToast,
+      wren: g.ambient.log.filter((l) => l.name === 'coziness_tier').map((l) => l.line).at(-1) || null, pup: g.puppy.state, saved: g.snapshot().journal.cozyBest };
+  });
+  await page.screenshot({ path: OUT + 'test-output/m2c-cozy-tierup.png' });
+  // the recipe it unlocks: tap the bench → Cozy tab → Potted Glowcap is no longer locked
+  Object.assign(tier, await page.evaluate(async () => { const g = __game, p = g.build.find('crafting_bench'); __faceOn(p, 2.2); await new Promise((r) => setTimeout(r, 600)); return { pt: __screenOf(p, 0.6) }; }));
+  if (tier.pt?.hit === 'crafting_bench') await tapXY(tier.pt);
+  await tap('#craft-tabs [data-tab="cozy"]');
+  Object.assign(tier, await page.evaluate(() => { const c = document.querySelector('.craft-card[data-id="potted_glowcap"]'); return { station: __game.craftUI.station, glowCard: !!c, glowLocked: !!c?.classList.contains('locked'), glowBtn: !!c?.querySelector('.craft-go') }; }));
+  await tap('#craftui .panel-close');
+  tier.pass = tier.before.score < 15 && tier.before.best === 0 && !tier.before.lock.ok && tier.placed && tier.after.score >= 15 && tier.after.best >= 1 && tier.last?.tier === 'snug_nook'
+    && /Snug Nook/.test(tier.toast) && !!tier.wren && !!tier.last?.cue && tier.saved >= 1 && tier.station === 'bench' && tier.glowCard && !tier.glowLocked && tier.glowBtn;
+  m2c.tier = tier;
+  // 6. m2_lines cooldowns: 20 s gap since any line, 60 s per trigger, fish_bite ignores both, a goal's wrenLine overrides
+  m2c.lines = await page.evaluate(() => {
+    const A = __game.ambient, said = [];
+    const t0 = A.time; A.pending = null; A.triggerAt = {}; A.lastAt = A.time - 100;
+    const step = (s) => { A.update(s); };
+    const o = {};
+    o.first = !!A.trigger('bench_placed');                       // spoken
+    o.gapBlocked = A.trigger('journal_opened') === null && A.pending?.name === 'journal_opened';
+    step(10); o.stillWaiting = A.log.at(-1).name === 'bench_placed';
+    step(10.5); o.pendingSpoken = A.log.at(-1).name === 'journal_opened'; // after the 20 s gap
+    step(21); o.sameBlocked = A.trigger('bench_placed') === null;   // 41.5 s < 60 s
+    o.fishBypass = !!A.trigger('fish_bite') && A.log.at(-1).name === 'fish_bite'; // right after a line
+    step(25); o.goalLine = A.trigger('goal_complete', { line: 'Goal line wins.' }) === 'Goal line wins.';
+    step(5); o.ambientGap = A.trigger('biscuit') === null; // ambient_lines keep their own 45 s gap, counted from any line
+    step(21); o.sameAfter60 = !!A.trigger('bench_placed');           // > 60 s since the first
+    o.craftFirst = (A._m2Pool('craft_first_time', { recipe: 'stone_axe' }) || []).length > 0 && (A._m2Pool('craft_success', { category: 'tools' }) || []).length > 0;
+    A.pending = null;
+    o.pass = Object.values(o).every(Boolean);
+    return o;
+  });
+  // 7. hints: shown once each, ✕ dismisses (real tap), Settings → Tutorial hints Off stops them
+  const hints = await page.evaluate(() => { const C = __game.coach; const shownSoFar = [...C.shown]; C.seen.delete('journal'); C.current = null; C.cool = 0; return { shownSoFar, show: C.show('journal', 30) }; });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: OUT + 'test-output/m2c-hint.png' });
+  hints.dismissTap = await tap('#coach .coach-x');
+  Object.assign(hints, await page.evaluate(() => { const C = __game.coach; return { afterDismiss: C.current, again: C.show('journal'), stored: JSON.parse(localStorage.getItem('ember_hollow.hints_seen') || '[]').includes('journal') }; }));
+  await page.evaluate(() => __game.settings.open());
+  hints.offTap = await tap('#set-hints');
+  Object.assign(hints, await page.evaluate(() => { const C = __game.coach; C.seen.delete('lantern'); C.cool = 0; return { setting: __game.settings.s.hints, storedSetting: JSON.parse(localStorage.getItem('ember_hollow.settings')).hints, blocked: !C.show('lantern') }; }));
+  await tap('#set-hints'); await page.evaluate(() => __game.settings.close());
+  hints.restored = await page.evaluate(() => __game.settings.s.hints === true);
+  hints.pass = hints.shownSoFar.includes('move') && hints.show && hints.dismissTap && hints.afterDismiss === null && !hints.again && hints.stored && hints.offTap && hints.setting === false && hints.storedSetting === false && hints.blocked && hints.restored;
+  m2c.hints = hints;
+  // the journal state goes into the save (checked again after the reload below)
+  m2c.savedDone = await page.evaluate(() => __game.snapshot().journal.done);
+  // tidy up for the 60-piece stress view
+  m2c.cleaned = await page.evaluate(() => { const g = __game, B = g.build;
+    for (const p of [...B.pieces]) if (['crafting_bench', 'table'].includes(p.type) && B.pieces.includes(p)) B.remove({}, p, true);
+    if (window.__m2cFire) g.fires.remove(window.__m2cFire);
+    return !B.pieces.some((p) => ['crafting_bench', 'table'].includes(p.type)); });
+  m2c.pass = m2c.ch1.pass && m2c.tier.pass && m2c.lines.pass && m2c.hints.pass && m2c.cleaned;
 }
 
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
@@ -856,11 +994,19 @@ Object.assign(reload, await page.evaluate((s) => {
   return { started: document.getElementById('start').classList.contains('hidden'), pieces: g.build.pieces.length, mushroom: g.player.inventory.mushroom,
     notesRead: g.lore.read.size, requestsDone: g.requests.done.size, tod: g.dayNight.tod, warmth: g.warmth, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2), handLantern: g.player.inventory.hand_lantern, lanternLit: g.lantern.lit };
 }, saved));
-reload.pass = reload.handLantern === 1 && reload.lanternLit && reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5 && Math.abs(reload.tod - saved.tod) < 5 && Math.abs(reload.warmth - saved.warmth) < 3;
+// M2C: journal checkmarks survive the reload (open it with a real tap on 📖)
+{
+  const tapJ = await page.evaluate(() => { const e = document.getElementById('btn-journal'); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await touch('touchStart', [{ x: tapJ.x, y: tapJ.y, id: 16 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(500);
+  Object.assign(reload, await page.evaluate(() => ({ journalDone: [...__game.journal.done], journalOpen: __game.journalUI.isOpen, journalChecks: [...document.querySelectorAll('#journal-body .jgoal.done')].map((e) => e.dataset.goal), cozyBest: __game.journal.cozyBest })));
+  await page.evaluate(() => __game.journalUI.close());
+  reload.journalPass = reload.journalOpen && m2c.savedDone.every((id) => reload.journalDone.includes(id)) && ['g1_fire', 'g1_bench', 'g1_stone_axe', 'g1_pet'].every((id) => reload.journalChecks.includes(id)) && reload.cozyBest >= 1;
+}
+reload.pass = reload.journalPass && reload.handLantern === 1 && reload.lanternLit && reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5 && Math.abs(reload.tod - saved.tod) < 5 && Math.abs(reload.warmth - saved.warmth) < 3;
 await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
 
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ title, m2, m2a, m2b, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, m2a, m2b, m2c, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !m2a.pass || !m2b.pass || !reload.pass || !m1.perf60?.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !m2a.pass || !m2b.pass || !m2c.pass || !reload.pass || !m1.perf60?.pass ? 1 : 0);
