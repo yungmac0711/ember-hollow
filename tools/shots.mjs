@@ -16,7 +16,7 @@ const b = await page.$eval('#title-new', (e) => { const r = e.getBoundingClientR
 await page.touchscreen.tap(b[0], b[1]);
 await page.waitForTimeout(1500);
 // clean frames: hide the touch controls / hotbar (Wren's speech bubble and the area title stay)
-await page.addStyleTag({ content: '#buttons,#hotbar,#tip,#btn-pause,#warmth,#joystick,#crosshair,#request,#objective,.toast,#toast{display:none!important}' });
+await page.addStyleTag({ content: '#buttons,#hotbar,#tip,#btn-pause,#warmth,#joystick,#crosshair,#request,#objective,#hint,.toast,#toast{display:none!important}' });
 const shot = async (name, setup, ms = 2500) => { await page.evaluate(setup); await page.waitForTimeout(ms); await page.screenshot({ path: OUT + name }); console.log('saved', name); };
 
 // shared helpers inside the page
@@ -73,21 +73,24 @@ await shot('m1-clearing-night.png', () => {
   h.friends(cl.x + 4.2, cl.z - 2.6, cl.x + 5.2, cl.z - 3.2);
 }, 4000);
 
+await page.evaluate((v) => { window.__DYAW = v; }, +(process.env.DYAW || 0.35));
 // 3. the Glowmere with wisps (lantern on, wisps drifting over the water)
 await shot('m1-glowmere.png', () => {
   const g = __game, s = g.glowmere.seat, L = g.glowmere.chamber.lake, h = __h;
   const ax = s.stand.x - L.x, az = s.stand.z - L.z, d = Math.hypot(ax, az);
-  h.stand(L.x + ax / d * (L.r + 2.2), L.z + az / d * (L.r + 2.2), L.x, L.z, -0.2);
+  // low on the shore, looking across the water past the glowcaps
+  h.stand(L.x + ax / d * (L.r + 1.4), L.z + az / d * (L.r + 1.4), L.x - az / d * 0.8, L.z + ax / d * 0.8, -0.16);
   h.friends(s.stand.x + 1.2, s.stand.z + 0.4, s.stand.x + 1.8, s.stand.z - 0.4);
 }, 5000);
 
 // 4. a cozy interaction: sitting with Wren by the Glowmere (Biscuit at their feet), Wren talking
-await shot('m1-cozy-sit.png', () => {
+await shot('m1-cozy-sit.png', () => { const DYAW = +(window.__DYAW || 0);
   const g = __game, s = g.glowmere.seat, h = __h;
   h.stand(s.stand.x, s.stand.z, s.pos.x, s.pos.z);
   g.wren.pos.set(s.wren.pos.x, s.wren.pos.y, s.wren.pos.z);
   g.puppy.pos.set(s.stand.x + 0.4, g.cave.floorAt(s.stand.x + 0.4, s.stand.z), s.stand.z);
   g.sitDown(s);
+  setTimeout(() => { g.player.yaw += DYAW; }, 1500); // turn the view a touch toward Wren
 }, 6000);
 console.log(errors.length ? 'errors: ' + errors.join(' | ') : 'no console errors');
 await browser.close();
