@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Ember Hollow</title>
+  <meta name="description" content="Ember Hollow — a cozy dark-fantasy cave survival prototype." />
+  <meta name="theme-color" content="#0a0d16" />
+  <!-- PWA / iPhone home-screen app -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Ember Hollow" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three/addons/": "./vendor/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Full-screen layer that receives joystick / look touches -->
+  <div id="touch-layer"></div>
+
+  <div id="hud">
+    <div id="inventory">
+      <div class="chip" id="inv-wood" title="Wood"><span class="ico">🪵</span><span class="n">0</span></div>
+      <div class="chip" id="inv-stone" title="Stone"><span class="ico">🪨</span><span class="n">0</span></div>
+      <div class="chip" id="inv-flint" title="Flint"><span class="ico">✦</span><span class="n">0</span></div>
+    </div>
+    <div id="hint"></div>
+    <div id="area-name"></div>
+    <div id="toast"></div>
+    <div id="subtitle"><span class="who">Wren</span><span class="line"></span></div>
+    <div id="fuel" class="hidden"><div class="label">Campfire</div><div class="bar"><div class="fill"></div></div></div>
+    <div id="crosshair"></div>
+    <div id="fps" class="hidden"></div>
+
+    <div id="joystick" class="hidden"><div class="knob"></div></div>
+
+    <div id="buttons">
+      <button class="btn small" id="btn-chat" aria-label="Talk">💬</button>
+      <button class="btn small" id="btn-build" aria-label="Build">🔨</button>
+      <button class="btn" id="btn-interact" aria-label="Interact"><span class="label">Use</span></button>
+      <button class="btn big" id="btn-jump" aria-label="Jump">⤒</button>
+    </div>
+  </div>
+
+  <div id="chat" class="hidden" role="dialog" aria-label="Chat">
+    <div class="chat-head"><span class="chat-name">Companion</span><button id="chat-close" aria-label="Close">✕</button></div>
+    <div class="chat-log" id="chat-log"></div>
+    <form id="chat-form" autocomplete="off">
+      <input id="chat-input" type="text" placeholder="Say something…" maxlength="400" enterkeyhint="send" />
+      <button type="submit" id="chat-send">Send</button>
+    </form>
+  </div>
+
+  <div id="start">
+    <div class="start-inner">
+      <div class="logo">🔥</div>
+      <h1>Ember Hollow</h1>
+      <p class="sub">a cozy cave in the dark</p>
+      <p id="start-msg">Loading…</p>
+      <div class="controls-help">
+        <div><b>Touch:</b> left thumb moves · drag right side to look · tap a friend to talk/pet</div>
+        <div><b>Desktop:</b> WASD · mouse look · Space jump · E use · B build · T talk</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rotate"><div>↻<br />Turn your phone sideways</div></div>
+
+  <script>
+    // Surface fatal load errors on the start screen (no dev console on a phone).
+    window.addEventListener('error', function (e) {
+      var m = document.getElementById('start-msg');
+      if (m && !(window.__game && window.__game.ready)) m.textContent = 'Load error: ' + (e.message || 'unknown');
+    });
+  </script>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
