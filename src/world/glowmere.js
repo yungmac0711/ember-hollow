@@ -17,11 +17,17 @@ function bake(parts, m, plain, glow, glowGain = 1) {
     const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
     for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
     g.applyMatrix4(m);
-    const em = p.material.emissive && p.material.emissive.getHex() ? p.material.emissive : null;
+    const em0 = p.material.emissive && p.material.emissive.getHex() ? p.material.emissive : null;
+    // §8.4 rev2: a lit surface with a faint emissive (the lilypad moss, #2E4A2A at 0.6) stays in the lit
+    // mesh and keeps its emissive strength in a per-vertex `emis` attribute; *_glow materials go unlit.
+    const litEm = em0 && !/glow/i.test(p.material.name || '') && p.material.color.getHex() !== 0;
+    const em = litEm ? null : em0;
     const c = em ? em.clone().multiplyScalar(0.55 * glowGain * Math.min(1.5, p.material.emissiveIntensity ?? 1)) : p.material.color;
-    const n = g.attributes.position.count, a = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    const e = litEm ? em0.clone().multiplyScalar(p.material.emissiveIntensity ?? 1) : null;
+    const n = g.attributes.position.count, a = new Float32Array(n * 3), ea = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; if (e) { ea[i * 3] = e.r; ea[i * 3 + 1] = e.g; ea[i * 3 + 2] = e.b; } }
     g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    if (!em) g.setAttribute('emis', new THREE.BufferAttribute(ea, 3));
     (em ? glow : plain).push(g);
   }
 }
@@ -108,7 +114,15 @@ export class Glowmere {
     this.jarSpot = { x: js.x, z: js.z, y: js.y, yaw: Math.atan2(L.x - js.x, L.z - js.z) };
 
     if (plain.length) {
-      this.plain = new THREE.Mesh(mergeGeometries(plain), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+      const pm = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+      pm.onBeforeCompile = (sh) => { // per-vertex emissive (lilypad moss), 0 everywhere else
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 emis;\nvarying vec3 vEmis;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEmis = emis;');
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vEmis;')
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vEmis;');
+      };
+      pm.customProgramCacheKey = () => 'glowmere-props-emis';
+      this.plain = new THREE.Mesh(mergeGeometries(plain), pm);
       this.plain.name = 'glowmere-props'; this.group.add(this.plain);
     }
     if (glow.length) {
@@ -141,8 +155,9 @@ export class Glowmere {
     this.group.add(this.water);
     colliders?.circle(L.x, L.z, L.r - 0.55); // Cam and the companions stay on the shore
 
-    // --- wisps (glowmere.json: 6, 0.25 m, additive #7FE3FF, 0.8; figure-8 lissajous r 1.5–3, speed 0.3, bob 0.4)
-    const N = 6;
+    // --- wisps (glowmere.json rev2 / §8.4: 10, 0.55 m pulsing 0.45–0.65 over 3 s, additive #7FE3FF, opacity 1.0;
+    // figure-8 lissajous r 1.5–3, speed 0.3, bob 0.4)
+    const N = 10;
     this.wisps = [];
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2 + rng() * 0.5, rr = rng() * (L.r - 1.5);
@@ -151,8 +166,8 @@ export class Glowmere {
     }
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
-    this.wispPts = new THREE.Points(wg, new THREE.PointsMaterial({ map: spriteTex('assets/textures/wisp_sprite.png'), color: 0x7fe3ff, size: 0.25, sizeAttenuation: true,
-      transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.wispPts = new THREE.Points(wg, new THREE.PointsMaterial({ map: spriteTex('assets/textures/wisp_sprite.png'), color: 0x7fe3ff, size: 0.55, sizeAttenuation: true,
+      transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false }));
     this.wispPts.name = 'glowmere-wisps'; this.wispPts.frustumCulled = false; this.wispPts.renderOrder = 3;
     this.group.add(this.wispPts);
     this.t = 0; this.pulse = 1; this.near = false; this.pull = 0;
@@ -175,6 +190,7 @@ export class Glowmere {
     // water: pulse emissive 0.8–1.2 over 4 s (cheapest option in glowmere.json)
     this.waterMat.emissiveIntensity = 1 + 0.2 * Math.sin(this.t * Math.PI * 2 / 4);
     if (this.glowMat) this.glowMat.color.setScalar(0.92 + 0.08 * Math.sin(this.t * 0.9));
+    this.wispPts.material.size = 0.55 + 0.1 * Math.sin(this.t * Math.PI * 2 / 3); // §8.4: 0.45–0.65 m over 3 s
     // wisps drift toward Cam while Wren's lantern is lit — and closer still when Cam sits still
     const want = Math.min(1, (env.lanternOn || 0) * 0.45 + (env.sitting ? 0.45 : 0)) * (d < c.r + 2 ? 1 : 0);
     this.pull += (want - this.pull) * Math.min(1, dt * 0.4);
