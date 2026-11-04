@@ -1,0 +1,864 @@
+{
+ "size": [
+  1024,
+  1792
+ ],
+ "cell": 128,
+ "icons": {
+  "armchair": {
+   "x": 0,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "bark_carving": {
+   "x": 128,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": "lore/bark_carving.glb",
+   "kind": "legacy"
+  },
+  "bedroll": {
+   "x": 256,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": "props/bedroll.glb",
+   "kind": "legacy"
+  },
+  "berry": {
+   "x": 384,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "berry_tea": {
+   "x": 512,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "biscuit_bed": {
+   "x": 640,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": "decor/biscuit_bed.glb",
+   "kind": "legacy"
+  },
+  "blue_marble": {
+   "x": 768,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/blue_marble.glb",
+   "kind": "legacy"
+  },
+  "bookshelf": {
+   "x": 896,
+   "y": 0,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "brass_button": {
+   "x": 0,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/brass_button.glb",
+   "kind": "legacy"
+  },
+  "brass_kettle": {
+   "x": 128,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "cave_perch": {
+   "x": 256,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "chest": {
+   "x": 384,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": "props/chest.glb",
+   "kind": "legacy"
+  },
+  "cooking_pot": {
+   "x": 512,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "crafting_bench": {
+   "x": 640,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "crystal": {
+   "x": 768,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "crystal_carp": {
+   "x": 896,
+   "y": 128,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "crystal_waylamp": {
+   "x": 0,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "crystal_wind_chime": {
+   "x": 128,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": "decor/crystal_wind_chime.glb",
+   "kind": "legacy"
+  },
+  "dog_bowl": {
+   "x": 256,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "edda_lamp_book": {
+   "x": 384,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ember_axe": {
+   "x": 512,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ember_garland": {
+   "x": 640,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ember_lamp": {
+   "x": 768,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ember_moss": {
+   "x": 896,
+   "y": 256,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ember_pick": {
+   "x": 0,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "feather_owl": {
+   "x": 128,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/feather_owl.glb",
+   "kind": "legacy"
+  },
+  "fence": {
+   "x": 256,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "fence-log": {
+   "x": 384,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": "build/fence-log.glb",
+   "kind": "legacy"
+  },
+  "fence_gate": {
+   "x": 512,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "fiber": {
+   "x": 640,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "fish": {
+   "x": 768,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "fish_stew": {
+   "x": 896,
+   "y": 384,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "fishing_rod": {
+   "x": 0,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "floor-plank": {
+   "x": 128,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": "build/floor-plank.glb",
+   "kind": "legacy"
+  },
+  "forge": {
+   "x": 256,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "glowcap": {
+   "x": 384,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "glowfin_minnow": {
+   "x": 512,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "glowmere_lantern_float": {
+   "x": 640,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "glowmere_pearl": {
+   "x": 768,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "grilled_fish": {
+   "x": 896,
+   "y": 512,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "hand_lantern": {
+   "x": 0,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "hearthstone": {
+   "x": 128,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "herb_bundle": {
+   "x": 256,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": "decor/herb_bundle.glb",
+   "kind": "legacy"
+  },
+  "journal_page": {
+   "x": 384,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": "lore/journal_page.glb",
+   "kind": "legacy"
+  },
+  "keeper_charm": {
+   "x": 512,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/keeper_charm.glb",
+   "kind": "legacy"
+  },
+  "lakeside_bench": {
+   "x": 640,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": "build/lakeside_bench.glb",
+   "kind": "legacy"
+  },
+  "lantern": {
+   "x": 768,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "lantern_double": {
+   "x": 896,
+   "y": 640,
+   "w": 128,
+   "h": 128,
+   "model": "build/lantern_double.glb",
+   "kind": "legacy"
+  },
+  "lily_root": {
+   "x": 0,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "message_bottle": {
+   "x": 128,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "mossy_boot": {
+   "x": 256,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "note_jar": {
+   "x": 384,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": "lore/note_jar.glb",
+   "kind": "legacy"
+  },
+  "note_paper": {
+   "x": 512,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": "lore/note_paper.glb",
+   "kind": "legacy"
+  },
+  "note_slate": {
+   "x": 640,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": "lore/note_slate.glb",
+   "kind": "legacy"
+  },
+  "painting": {
+   "x": 768,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "potted_glowcap": {
+   "x": 896,
+   "y": 768,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "roasted_mushroom": {
+   "x": 0,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "roof-log": {
+   "x": 128,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": "build/roof-log.glb",
+   "kind": "legacy"
+  },
+  "rug": {
+   "x": 256,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "silver_eel": {
+   "x": 384,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "stained_crystal_lamp": {
+   "x": 512,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "stew": {
+   "x": 640,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "stew-bowl": {
+   "x": 768,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "stew-pot": {
+   "x": 896,
+   "y": 896,
+   "w": 128,
+   "h": 128,
+   "model": "props/stew-pot.glb",
+   "kind": "legacy"
+  },
+  "stick": {
+   "x": 0,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "stone": {
+   "x": 128,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "stone_axe": {
+   "x": 256,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "stone_path": {
+   "x": 384,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "stone_pick": {
+   "x": 512,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "tin_whistle": {
+   "x": 640,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/tin_whistle.glb",
+   "kind": "legacy"
+  },
+  "tiny_lantern": {
+   "x": 768,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/tiny_lantern.glb",
+   "kind": "legacy"
+  },
+  "torch": {
+   "x": 896,
+   "y": 1024,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "torch_wall": {
+   "x": 0,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "ui_back": {
+   "x": 128,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_check": {
+   "x": 256,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_close": {
+   "x": 384,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_coziness": {
+   "x": 512,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_craft": {
+   "x": 640,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_hand": {
+   "x": 768,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_heart": {
+   "x": 896,
+   "y": 1152,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_hunger": {
+   "x": 0,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_inventory": {
+   "x": 128,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_journal": {
+   "x": 256,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_lock": {
+   "x": 384,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_map": {
+   "x": 512,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_menu": {
+   "x": 640,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_moon": {
+   "x": 768,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_plus": {
+   "x": 896,
+   "y": 1280,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_rain": {
+   "x": 0,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_settings": {
+   "x": 128,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_sun": {
+   "x": 256,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "ui_warmth": {
+   "x": 384,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "ui"
+  },
+  "wall-log": {
+   "x": 512,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": "build/wall-log.glb",
+   "kind": "legacy"
+  },
+  "wall-log-door": {
+   "x": 640,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": "build/wall-log-door.glb",
+   "kind": "legacy"
+  },
+  "wall-log-window": {
+   "x": 768,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": "build/wall-log-window.glb",
+   "kind": "legacy"
+  },
+  "waylamp": {
+   "x": 896,
+   "y": 1408,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "waylamp_hook": {
+   "x": 0,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": "lore/waylamp_hook.glb",
+   "kind": "legacy"
+  },
+  "waylamp_key": {
+   "x": 128,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": "keepsakes/waylamp_key.glb",
+   "kind": "legacy"
+  },
+  "waylamp_lens": {
+   "x": 256,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "wind_chime": {
+   "x": 384,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "window_shutters": {
+   "x": 512,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "wood": {
+   "x": 640,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "legacy"
+  },
+  "wooden_shelves": {
+   "x": 768,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  },
+  "woven_rug": {
+   "x": 896,
+   "y": 1536,
+   "w": 128,
+   "h": 128,
+   "model": "decor/woven_rug.glb",
+   "kind": "legacy"
+  },
+  "wren_quilt": {
+   "x": 0,
+   "y": 1664,
+   "w": 128,
+   "h": 128,
+   "model": null,
+   "kind": "item"
+  }
+ },
+ "aliases": {
+  "crystal_lamp": "stained_crystal_lamp",
+  "roasted_mushrooms": "roasted_mushroom",
+  "berries": "berry",
+  "gate": "fence_gate",
+  "fiber_bundle": "fiber",
+  "axe": "stone_axe",
+  "pickaxe": "stone_pick",
+  "shelves": "wooden_shelves",
+  "shutters": "window_shutters",
+  "path_tile": "stone_path",
+  "chime": "wind_chime",
+  "tea": "berry_tea",
+  "pot": "cooking_pot"
+ }
+}
