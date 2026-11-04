@@ -51,6 +51,8 @@ const dataDir = resolve(storyDir, 'data');
 const DATA = {
   ambient: 'ambient_lines.json', replies: 'wren_replies.json', requests: 'requests.json', lore: 'lore_notes.json',
   biscuitFinds: 'biscuit_finds.json', itemFlavor: 'item_flavor.json', uiText: 'ui_text.json', sleepLines: 'sleep_lines.json',
+  // M2 chunk C: Hearth Journal, coziness scoring, crafting/journal lines
+  journal: 'hearth_journal.json', coziness: 'coziness.json', m2Lines: 'm2_lines.json',
 };
 const story = {};
 for (const [k, f] of Object.entries(DATA)) story[k] = JSON.parse(readFileSync(resolve(dataDir, f), 'utf8'));
