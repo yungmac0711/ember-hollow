@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { lambert } from '../assets.js';
 import { Emitter } from '../render/lights.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const FC = CONFIG.fire;
 
@@ -103,7 +104,19 @@ export class Campfire {
     this.flames = [];
     const fMat = [0xff7a1a, 0xffb347, 0xffe08a].map((c) => new THREE.MeshBasicMaterial({
       color: c, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
-    [[0.22, 0.75, 0], [0.15, 0.6, 1], [0.08, 0.45, 2]].forEach(([r, h, m]) => {
+    const cones = [[0.22, 0.75, 0], [0.15, 0.6, 1], [0.08, 0.45, 2]];
+    if (CONFIG.debug.low) {
+      // M2 chunk B (low tier): the three nested cones as one vertex-coloured mesh — 1 draw call per fire instead of 3
+      const gs = cones.map(([r, h, m]) => {
+        const g = new THREE.ConeGeometry(r, h, 6).toNonIndexed(); g.translate(0, h / 2, 0); g.deleteAttribute('uv');
+        const c = new THREE.Color([0xff7a1a, 0xffb347, 0xffe08a][m]), a = new Float32Array(g.attributes.position.count * 3);
+        for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g;
+      });
+      const f = new THREE.Mesh(mergeGeometries(gs), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+      gs.forEach((g) => g.dispose()); fMat.forEach((m) => m.dispose());
+      f.position.y = 0.08; this.flames.push(f); this.group.add(f);
+    } else cones.forEach(([r, h, m]) => {
       const g = new THREE.ConeGeometry(r, h, 6); g.translate(0, h / 2, 0);
       const f = new THREE.Mesh(g, fMat[m]); f.position.y = 0.08; this.flames.push(f); this.group.add(f);
     });

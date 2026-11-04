@@ -207,7 +207,14 @@ export class BuildSystem {
     // and one plain + one glow mesh for small decor (frustum culled by three; small decor and far cells are
     // distance-hidden in _cull).
     this.cells = new Map();
-    this._plainMat = lambert(0xffffff, { vertexColors: true }); this._glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+    // one material for the whole idle batch: Lambert, but vertices with glow = 1 skip lighting (what the old MeshBasic
+    // glow mesh did) — so each cell is a single draw call instead of plain + glow
+    this._plainMat = lambert(0xffffff, { vertexColors: true });
+    this._plainMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = 'attribute float glow;\nvarying float vGlow;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvGlow = glow;');
+      sh.fragmentShader = 'varying float vGlow;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight = mix(outgoingLight, diffuseColor.rgb, vGlow);\n#include <opaque_fragment>');
+    };
+    this._plainMat.customProgramCacheKey = () => 'build-batch-glow';
     this._dirty = false; this._idle = 0; this.batched = false;
     this._enclosed = new Set(); this._encDirty = true;
     this.onChange = null; // (piece, added) => void
@@ -477,27 +484,32 @@ export class BuildSystem {
   }
   /** Merge every placed piece's static parts into per-cell batch meshes (rebuilt only when idle). */
   _rebuildBatch() {
-    const CL = CONFIG.build.cluster || 12, groups = new Map();
+    // greedy proximity clusters (seed = first piece, radius CONFIG.build.cluster) rather than a fixed grid, so a
+    // base sitting on a grid line isn't split in four; the low tier also folds small decor into its cluster's mesh
+    const CL = CONFIG.build.cluster || 12, groups = new Map(), seeds = [], split = !CONFIG.debug.low;
     for (const p of this.pieces) {
-      const small = !!PIECES[p.type].small;
-      const key = `${Math.floor(p.x / CL)},${Math.floor(p.z / CL)}|${small ? 's' : 'b'}`;
-      let gr = groups.get(key); if (!gr) groups.set(key, gr = { small, plain: [], glow: [] });
+      let ci = -1, bd = CL;
+      seeds.forEach((sd, i) => { const d = Math.hypot(sd[0] - p.x, sd[1] - p.z); if (d < bd) { bd = d; ci = i; } });
+      if (ci < 0) { ci = seeds.length; seeds.push([p.x, p.z]); }
+      const small = split && !!PIECES[p.type].small;
+      const key = `c${ci}|${small ? 's' : 'b'}`;
+      let gr = groups.get(key); if (!gr) groups.set(key, gr = { small, list: [] });
       for (const part of this.batches[p.type].src.static) {
         if (!part.batch) continue;
         const g = part.batch.geometry.clone().applyMatrix4(p.matrix);
-        (part.batch.glow ? gr.glow : gr.plain).push(g);
+        g.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(part.batch.glow ? 1 : 0), 1));
+        gr.list.push(g);
       }
     }
     for (const c of this.cells.values()) for (const m of c.meshes) { this.scene.remove(m); m.geometry.dispose(); }
     this.cells.clear();
     for (const [key, gr] of groups) {
       const meshes = [];
-      for (const [list, glow] of [[gr.plain, false], [gr.glow, true]]) {
-        if (!list.length) continue;
-        const geo = mergeGeometries(list); list.forEach((g) => g.dispose());
+      if (gr.list.length) {
+        const geo = mergeGeometries(gr.list); gr.list.forEach((g) => g.dispose());
         geo.computeBoundingSphere();
-        const mesh = new THREE.Mesh(geo, glow ? this._glowMat : this._plainMat);
-        mesh.name = `build-batch-${key}${glow ? '-glow' : ''}`; mesh.matrixAutoUpdate = false; mesh.visible = true;
+        const mesh = new THREE.Mesh(geo, this._plainMat);
+        mesh.name = `build-batch-${key}`; mesh.matrixAutoUpdate = false; mesh.visible = true;
         this.scene.add(mesh); meshes.push(mesh);
       }
       if (meshes.length) this.cells.set(key, { small: gr.small, sphere: meshes[0].geometry.boundingSphere, meshes });
