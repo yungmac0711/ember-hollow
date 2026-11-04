@@ -138,6 +138,8 @@ export const CONFIG = {
       // animated in code (src/companion/wren-anim.js). The hood-up variant supplies the hood_up node.
       companion: 'assets/models/characters/wren/wren.glb',
       companionHood: 'assets/models/characters/wren/wren-hood-up.glb',
+      camSit: 'assets/models/characters/cam/cam-sit.glb', // Cam is only seen seated (hood up / down)
+      camSitHoodDown: 'assets/models/characters/cam/cam-sit-hood-down.glb',
       campfire: 'assets/models/campfire/campfire-pit.glb',
       stick: 'assets/models/props/resource-wood.glb',
       stone: 'assets/models/props/resource-stone.glb',

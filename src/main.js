@@ -14,7 +14,7 @@ import { Player } from './entities/player.js';
 import { Items, ITEM_INFO } from './entities/items.js';
 import { Puppy, buildPuppyPrimitive } from './entities/puppy.js';
 import { FireSystem } from './fire/campfire.js';
-import { CamStandIn } from './companion/cam-standin.js';
+import { CamSeated } from './companion/cam.js';
 import { Wren, buildWrenPrimitive } from './companion/wren.js';
 import { createAdapter } from './companion/llm/index.js';
 import { CompanionMemory } from './companion/memory.js';
@@ -133,8 +133,8 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
-  const [surfParts, stewPotP, camScene, camHood] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
-    loadScene('companion'), loadScene('companionHood')]); // polish: Cam's seated stand-in (provisional)
+  const [surfParts, stewPotP, camSitUp, camSitDown] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
+    loadScene('camSit'), loadScene('camSitHoodDown')]); // Cam, seated only (Art's cam-sit*.glb, provisional look)
   const gmP = {}; // Chunk D: the Glowmere set
   await Promise.all(['water', 'rock1', 'rock2', 'cap1', 'cap2', 'cap3', 'reeds', 'lily1', 'lily2'].map(async (k) => {
     gmP[k] = await loadParts('gm' + k[0].toUpperCase() + k.slice(1), raw);
@@ -186,7 +186,7 @@ async function init() {
   const hoodUp = wrenHood?.root.getObjectByName('hood_up') || null;
   const wrenModel = wrenScene ? { ...wrenScene, hoodUp } : { root: buildWrenPrimitive().root, animations: [] };
   const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
-  const camStandIn = new CamStandIn(scene, camScene, camHood?.root.getObjectByName('hood_up') || null);
+  const cam = new CamSeated(scene, camSitUp, camSitDown);
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
@@ -993,7 +993,6 @@ async function init() {
     const anyLit = fires.anyLit;
     ambientLight.update(dt, player.pos, fires); // §8.1 distance-driven ambient
     puppy.update(dt, player, fires);
-    camStandIn.update(dt, player.seat);
     wren.update(dt, player, fires, chat.open, {
       fog: fogState(), items: running ? items : null, nightSurface: dayNight.nightness * dayNight.b,
       onGather: (it) => {
@@ -1001,6 +1000,7 @@ async function init() {
         hud.toast(`Wren hands you ${ITEM_INFO[it.kind].label}`, 1.8); audio.blip(600);
       },
     });
+    cam.update(dt, player.seat, wren.hoodUp); // after Wren, so Cam's hood matches hers this frame
     decor.update(dt);
     dressing.update(dt, { anyFireLit: anyLit });
     budget.update(dt, camera.getWorldPosition(_camPos));
@@ -1025,7 +1025,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { camStandIn, settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { cam, settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });
