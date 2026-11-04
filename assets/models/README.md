@@ -72,3 +72,17 @@ wood, stone, glowcap, crystal (shard), chest, bedroll, wall-log, wall-log-door, 
 floor-plank, roof-log, lantern_double, plus (chunk B) stew-bowl, stick, note_paper, note_slate, journal_page, the four decorations,
 lakeside_bench and the seven keepsakes. Items/pieces without an icon (flint, mushroom, hearth, table)
 use an emoji.
+
+## The Glowmere (`glowmere/`, chunk D, Ember Hollow originals from art/assets/glowmere)
+
+| File | Used for | Config key |
+|---|---|---|
+| water_plane_tile.glb | 3×3 merged tiles, clipped to the lake circle; glowmere.json water material | `gmWater` |
+| shore_rock_1/2.glb | rim rocks + the sit rock (shore_rock_1), 2 half-sunk crystal rocks | `gmRock1`, `gmRock2` |
+| glowcap_cluster_1..3.glb | 14 clusters round the shore (emissive caps) | `gmCap1..3` |
+| glow_reeds.glb | 12 reed clumps (emissive tips) | `gmReeds` |
+| lilypad_1/2.glb | 10 pads (lilypad_1 has the emissive bloom) | `gmLily1`, `gmLily2` |
+| ../textures/wisp_sprite.png, firefly_sprite.png | 6 wisps, 25 grotto / 40 dusk fireflies (Points) | — |
+
+The props are baked into one vertex-colour Lambert mesh plus one unlit glow mesh (emissive colour ×
+strength), so the grotto costs about 5 draw calls. `lore/note_jar.glb` holds the Glowmere's note.

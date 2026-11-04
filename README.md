@@ -1,4 +1,4 @@
-# Ember Hollow — M0 prototype + M1 chunks A/B (gathering, building, save, Biscuit v2, Wren's requests & lore)
+# Ember Hollow — M0 prototype + M1 (gathering, building, save, Biscuit v2, Wren's requests & lore, day/night, the Glowmere, audio, settings)
 
 A cozy, dark-fantasy cave-survival game for the phone. You are **Cam**. You explore a cave, gather
 wood, stone and flint, and light a campfire to push the fog back. **Wren** keeps you company and
@@ -216,6 +216,57 @@ wood to light it). The chest has its own storage panel; tap a stack to move it.
 - **Save** adds the time of day, weather, warmth, chopped/collected state with respawn timers, and
   stew pots.
 
+## What's in M1 chunk D
+
+- **The Glowmere** (area id `glowmere`, `src/world/glowmere.js`): an underground lake off the Hushing
+  Pools (a tunnel from the pools' far side). It uses the art/assets/glowmere set: tiled water with the
+  glowmere.json material (#1E4A5C, emissive, 0.82 opacity, slow pulse), shore rocks, three glowcap
+  clusters, glow reeds, lilypads, 6 wisps and 25 fireflies. All the glow comes from emissive materials;
+  there are no new lights. It has its own teal §8.1 zone tint and fog. Sit on the shore rock by the
+  water (*Sit by the water*): Cam and Wren sit side by side and the camera eases back. The wisps drift
+  closer while you sit or while Wren's lantern is on. Push the stick or jump to stand. Walking in
+  fires `enter_glowmere` and sitting fires `glowmere_sit`. The last lore note (*Message in a Jar*) lies
+  on the shore.
+- **Requests:** Wren offers *Bench by the Glowmere* there, after Biscuit's bed. The bench seats Cam
+  and Wren on its `sit_point_A/B` (*Sit on the bench*). The *Second Lantern* (lantern_double) chain
+  can be finished as well. You can't build in the lake.
+- **Audio** (`src/audio.js`, the CC0 set in `assets/audio/`, see the credits below): Web Audio buffer
+  loops, never `<audio loop>`. Each sound's gain is its audio.json `suggested_volume`, except the cave
+  beds, which use 0.12.
+  - A spatial fire crackle with pops.
+  - The cave beds crossfade by area: ambience in Lanternmouth and the Glowcap Galleries, wind on
+    Flintseam, drips in Mossdrip, the Hushing Pools and the Glowmere.
+  - Rain plays at 0.29 outdoors and 0.22 under a roof, with a 0.5 s crossfade, and is silent in caves.
+  - Footsteps change by surface (wood, grass, stone), Biscuit yips when he barks, and chimes ring
+    every 6–15 s near a placed wind chime. One-shots play at ±5% rate.
+  - Music plays at 0.22 and ducks 30% while you chat with Wren.
+  - On iOS, audio unlocks on the title tap and is suspended and resumed on `visibilitychange`.
+- **Settings** (title and pause menus, saved in `localStorage['ember_hollow.settings']`):
+  - master, music and effects volume
+  - look sensitivity
+  - invert-Y
+  - graphics *Auto / Low / High*. Low = 1 dynamic point light and a 1.25 pixel-ratio cap. Auto
+    picks Low on ≤2-core or ≤2 GB devices. A graphics change applies on *Restart to apply*, which
+    saves first; `?low=1` always forces Low.
+- **Lantern:** Wren's lantern keeps the §8.2 night values and now beats the moon for the low tier's
+  only light slot at night, so it stays on the surface too (§8.1 3.5 / 7 m).
+
+### Audio credits (all CC0 1.0 from OpenGameArt unless noted; edits: trims, loudness, loop crossfades, AAC)
+
+| File | Source | Author |
+|---|---|---|
+| fire/fire-crackle-loop | https://opengameart.org/content/fireplace-sound-loop | PagDev |
+| fire/fire-pop | https://opengameart.org/content/fire-crackling | AntumDeluge |
+| cave/cave-drips-loop | https://opengameart.org/content/dripping-water-loop | Independent.nu (submitted by qubodup) |
+| cave/cave-wind-loop | https://opengameart.org/content/wind-whoosh-loop | SketchMan3 |
+| cave/cave-ambience-loop | https://opengameart.org/content/loopable-dungeon-ambience | JaggedStone |
+| footsteps/stone-1..6, grass-1..3 | https://opengameart.org/content/fantozzis-footsteps-grasssand-stone | Fantozzi (submitted by qubodup) |
+| footsteps/wood-1..3 | https://opengameart.org/content/different-steps-on-wood-stone-leaves-gravel-and-mud | TinyWorlds |
+| dog/yip-1..3 | https://opengameart.org/content/baby-animals-sounds-pack | Technopeasant |
+| music/cozy-guitar-loop | https://opengameart.org/content/calm-fireplace-guitar-song | ShggothSlave |
+| ambience/rain-loop, rain-shelter-loop | generated (art/tools/build_audio.py) | Ember Hollow (project-owned) |
+| decor/chime-1..3 | original synthesis | Ember Hollow (project-owned) |
+
 ## Install on iPhone (Safari)
 
 1. Open the game's **HTTPS** URL in **Safari**. Other iOS browsers can't install PWAs reliably.
@@ -279,10 +330,10 @@ game/
 │   ├── main.js           # bootstrap, game loop, interactions, triggers, session handling
 │   ├── config.js         # every tunable: render/fog/lights, player, fire, costs, names, LLM, asset paths
 │   ├── assets.js         # GLB loader with primitive fallback (drop-in art)
-│   ├── audio.js          # WebAudio crackle + blips, unlocked on first tap
+│   ├── audio.js          # Web Audio: buffer loops (crackle, cave beds, rain, music), footsteps, yips, chimes; iOS unlock
 │   ├── render/           # lights.js (LightBudget + emitters), character-materials.js (lift + rim)
 │   ├── render/ambient.js # firelight-aware hemisphere/fog colours + zone tints
-│   ├── world/            # cave.js (SDF cave, meshes, collision), colliders.js (piece colliders + steering), lore.js (notes + parchment reader), decor.js, dressing.js, noise.js
+│   ├── world/            # cave.js (SDF cave, meshes, collision), colliders.js (piece colliders + steering), lore.js (notes + parchment reader), glowmere.js (lake, props, wisps, fireflies), decor.js, dressing.js, noise.js
 │   ├── save/save.js      # versioned save in localStorage, New Game flag
 │   ├── data/story.js     # GENERATED from ../story/data by tools/sync-story.mjs (bank, ambient, requests, lore, finds, flavor, ui text)
 │   ├── input/input.js    # multitouch joystick/look/buttons/taps + keyboard/pointer-lock
@@ -291,10 +342,10 @@ game/
 │   ├── build/            # pieces.js (catalogue + costs), shelter.js (snap, ghost, instancing, doors, chests)
 │   ├── companion/        # wren.js, wren-anim.js, chat-ui.js, ambient.js, memory.js, context.js,
 │   │   │                 # requests.js, when.js (state `when` filters), story-data.js (GENERATED), llm/ adapters (bank-adapter.js)
-│   └── ui/               # hud.js, inventory-ui.js (hotbar, pack + journal, chest, palette, ring), tap.js (iOS-safe taps)
-├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs, screenshots.mjs,
+│   └── ui/               # hud.js, inventory-ui.js (hotbar, pack + journal, chest, palette, ring), tap.js (iOS-safe taps), settings.js
+├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs, screenshots.mjs, shots.mjs (M1 shots),
 │                         # extract-biscuit-poses.mjs, pose-preview.html (dev pose viewer)
-├── screenshots/          # art-review phone screenshots (1688×780), not precached
+├── screenshots/          # phone screenshots (1688×780; m1-*.png = M1 set), not precached
 └── docs/                 # ROADMAP.md, screenshot.png
 ```
 
@@ -345,7 +396,15 @@ The test emulates an iPhone in landscape (844×390, touch). It:
   *Not yet* / ✕ / *Sleep till morning* (Day +1, saved, goodnight/goodMorning, no sleep_start), and
   perf in the clearing by day, the clearing at night in rain, and the cave mouth (≤60 calls, ≤80k
   tris, ≤2 lights); `reload` also checks time of day and warmth
+- chunk D (`m4`), with real touch taps and trusted clicks swallowed: pause → Settings → master slider,
+  invert-Y and graphics tier (checked in localStorage, *Restart to apply* shown) and back; audio
+  (all 26 buffers decoded, footsteps counted, no `<audio>` tags); the Glowmere (`enter_glowmere`, perf
+  ≤60/80k/2, the lore jar, *Sit by the water* via the Use button → seated, camera eased out,
+  `glowmere_sit`, Wren seated, stand with the stick); and the request chain (second lantern + lakeside
+  bench, the bench offered only at the Glowmere, no building in the lake, *Sit on the bench*)
 - confirms the service worker activates
+
+`node tools/shots.mjs` (same server) writes the four M1 shots to `screenshots/m1-*.png`.
 
 Screenshots go to `docs/screenshot.png` and `docs/test-output/`. The perf block reports draw calls,
 triangles, real point lights and how many are active, the hemisphere intensity, and Wren's hood.

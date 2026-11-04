@@ -81,6 +81,7 @@ const result = await page.evaluate(async () => {
   const c = g.cave.chambers[0];
   g.player.pos.set(c.x - 1.5, g.cave.floorAt(c.x - 1.5, c.z + 1), c.z + 1);
   g.player.yaw = -1.1; g.player.pitch = -0.32;
+  g.puppy.pos.set(c.x + 4, g.cave.floorAt(c.x + 4, c.z - 3), c.z - 3); // Biscuit in front of Cam would take the tap (Pet Biscuit)
   await wait(200); await pressInteract();
   const fire = g.fires.fires[0];
   await wait(300); await pressInteract(); // add one wood
@@ -119,13 +120,14 @@ m1.chop = await page.evaluate(async () => {
   const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms));
   // the tree with the most room around it (a pickup in front of a tree takes priority over chopping)
   const room = (n) => Math.min(...g.items.list.filter((i) => i.alive).map((i) => i.pos.distanceTo(n.pos)));
-  const t = g.harvest.nodes.filter((n) => n.type === 'tree' && n.alive).sort((a, b) => room(b) - room(a))[0];
+  const t = g.harvest.nodes.filter((n) => n.type === 'tree' && n.alive && !n.deco).sort((a, b) => room(b) - room(a))[0];
   let dx = 0, dz = 0; // stand on the open side (away from the cave wall)
   for (let k = 0; k < 16; k++) { const a = k / 16 * 6.283, x = t.pos.x + Math.cos(a) * 1.5, z = t.pos.z + Math.sin(a) * 1.5; if (g.cave.field(x, z) > g.cave.field(t.pos.x + dx * 1.5, t.pos.z + dz * 1.5)) { dx = Math.cos(a); dz = Math.sin(a); } }
   const L = Math.hypot(dx, dz) || 1;
   const px = t.pos.x + dx / L * 1.5, pz = t.pos.z + dz / L * 1.5;
   g.player.pos.set(px, g.cave.floorAt(px, pz), pz);
   g.player.yaw = Math.atan2(-(t.pos.x - px), -(t.pos.z - pz)); g.player.pitch = -0.1;
+  g.puppy.pos.set(px - (t.pos.x - px) * 2, g.puppy.pos.y, pz - (t.pos.z - pz) * 2); // keep Biscuit behind Cam
   await wait(150);
   const label = g.hud.interactBtn?.textContent || document.getElementById('btn-interact')?.textContent;
   const w0 = g.player.inventory.wood;
@@ -395,8 +397,8 @@ const m3 = {};
   m3.cook.slotGlow = (await tapSel('#hotbar .slot[data-kind="glowcap"]')) && await page.evaluate(() => __game.invUI.selected === 'glowcap');
   m3.cook.addLabel = await label();
   await tapSel('#btn-interact');
-  m3.cook.cooking = await page.evaluate(() => { const pot = __game.cooking.potFor(window.__potFire); return { state: pot.state, steam: pot.steam?.visible ?? null, line: __game.ambient.log.some((l) => l.name === 'stew_cooking') }; });
-  await page.evaluate(() => { __game.cooking.potFor(window.__potFire).t = 14.5; });
+  m3.cook.cooking = await page.evaluate(() => { const pot = __game.cooking.potFor(window.__potFire); return { state: pot?.state, steam: pot?.steam?.visible ?? null, line: __game.ambient.log.some((l) => l.name === 'stew_cooking') }; });
+  await page.evaluate(() => { const p = __game.cooking.potFor(window.__potFire); if (p) p.t = 14.5; });
   await page.waitForTimeout(1200);
   m3.cook.takeLabel = await label();
   await tapSel('#btn-interact');
@@ -455,6 +457,97 @@ const m3 = {};
   m3.pass = m3.cook.pass && m3.warm.pass && m3.sleep.pass && m3.perf.pass;
 }
 
+// ---------------------------------------------------------------- M1 chunk D: settings, audio, the Glowmere
+const m4 = {};
+{
+  const center = (sel) => page.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2, r.x, r.width]; });
+  const tapSel = async (sel) => { const b = await center(sel); await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(250); };
+  await page.evaluate(() => window.addEventListener('click', window.__dropClicks, true)); // iOS: trusted clicks swallowed again
+  // Settings through real touch: pause → Settings → master slider at ~25% → invert-Y → tier Low (pending) → Auto → close → resume
+  await tapSel('#btn-pause'); await tapSel('#pause-settings');
+  const open = await page.evaluate(() => !document.getElementById('settings').classList.contains('hidden'));
+  const sl = await center('#set-master'); await page.touchscreen.tap(sl[2] + sl[3] * 0.25, sl[1]); await page.waitForTimeout(250);
+  await tapSel('#set-invert'); await tapSel('#set-tier [data-tier="low"]');
+  const mid = await page.evaluate(() => ({ s: { ...__game.settings.s }, stored: JSON.parse(localStorage.getItem('ember_hollow.settings') || '{}'), reloadShown: !document.getElementById('set-reload').classList.contains('hidden'),
+    inv: __game.player.invertY, master: __game.audio.vol.master }));
+  await page.screenshot({ path: OUT + 'test-output/13-settings.png' });
+  await tapSel('#set-tier [data-tier="auto"]'); await tapSel('#set-invert'); await tapSel('#settings-close');
+  const back = await page.evaluate(() => ({ pauseShown: !document.getElementById('pause').classList.contains('hidden'), tier: __game.settings.s.tier, inv: __game.player.invertY }));
+  await tapSel('#pause-resume');
+  m4.settings = { open, mid, back, pass: open && mid.s.master > 0.1 && mid.s.master < 0.45 && mid.stored.master === mid.s.master && mid.stored.invertY === true && mid.inv === true
+    && mid.stored.tier === 'low' && mid.reloadShown && back.pauseShown && back.tier === 'auto' && back.inv === false && Math.abs(mid.master - mid.s.master) < 1e-6 };
+  await page.evaluate(() => window.removeEventListener('click', window.__dropClicks, true));
+  // Audio: buffers decoded, footsteps by surface, no <audio> elements
+  m4.audio = await page.evaluate(() => { const a = __game.audio; return { state: a.ctx?.state, stats: JSON.parse(JSON.stringify(a.stats)), audioTags: document.querySelectorAll('audio').length }; });
+  m4.audio.pass = m4.audio.stats.decoded >= 20 && m4.audio.stats.failed === 0 && m4.audio.stats.steps > 0 && m4.audio.audioTags === 0;
+  // The Glowmere: walk in, enter_glowmere, perf, sit with the real Use button, camera eases out, stand with the stick
+  m4.glowmere = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), s = g.glowmere.seat;
+    g.dayNight.forceRain = false; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0;
+    g.player.pos.set(s.stand.x, s.stand.y, s.stand.z); g.player.yaw = s.yaw; g.player.pitch = -0.15;
+    g.wren.pos.set(s.stand.x + 1, s.stand.y, s.stand.z); g.puppy.pos?.set(s.stand.x - 1, s.stand.y, s.stand.z);
+    await wait(2500);
+    const i = g.renderer.info.render;
+    return { area: g.gameState().world.area, enter: g.ambient.log.some((l) => l.name === 'enter_glowmere'), calls: i.calls, tris: i.triangles, lights: g.budget.activeCount,
+      note: g.lore.notes.some((n) => n.id === 'note_glowmere_wish'), label: document.querySelector('#btn-interact .label').textContent, wisps: g.glowmere.wisps.length };
+  });
+  await tapSel('#btn-interact'); await page.waitForTimeout(2200);
+  Object.assign(m4.glowmere, await page.evaluate(() => { const g = __game, p = g.player;
+    return { seated: !!p.seat, sitE: +(p.sitE || 0).toFixed(2), camBack: +Math.hypot(g.camera.position.x - p.pos.x, g.camera.position.z - p.pos.z).toFixed(2), sitTrig: g.ambient.log.some((l) => l.name === 'glowmere_sit'),
+      wren: g.wren.state, fov: +g.camera.fov.toFixed(1), standLabel: document.querySelector('#btn-interact .label').textContent }; }));
+  await page.screenshot({ path: OUT + 'test-output/14-glowmere-sit.png' });
+  await touch('touchStart', [{ x: 150, y: 280, id: 1 }]);
+  for (let k = 1; k <= 10; k++) { await touch('touchMove', [{ x: 150, y: 280 - k * 6, id: 1 }]); await page.waitForTimeout(40); }
+  await page.waitForTimeout(300); await touch('touchEnd', []); await page.waitForTimeout(400);
+  m4.glowmere.stoodUp = await page.evaluate(() => !__game.player.seat && !__game.wren.seat);
+  const G = m4.glowmere;
+  G.pass = G.area === 'glowmere' && G.enter && G.calls <= 60 && G.tris <= 80000 && G.lights <= 2 && G.note && G.label === 'Sit by the water' && G.seated && G.sitE > 0.9 && G.camBack > 1
+    && G.sitTrig && G.wren === 'seat' && G.standLabel === 'Stand up' && G.stoodUp;
+  // Request chain: the lakeside bench (offered at the Glowmere) and the second lantern both finish; the bench seats two
+  m4.chain = await page.evaluate(async () => {
+    const g = __game, rq = g.requests, wait = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
+    const saveDone = new Set(rq.done), saveActive = rq.active, saveUnl = new Set(rq.unlocked);
+    // every earlier request done; the two finales are offered in list order (lantern, then the bench at the Glowmere)
+    rq.active = null; for (const r of rq.list) if (r.id !== 'req_lakeside_bench' && r.id !== 'req_second_lantern') rq.done.add(r.id);
+    rq.unlocked.delete('lakeside_bench'); rq.unlocked.delete('lantern_double');
+    Object.assign(g.player.inventory, { wood: 40, stone: 40, flint: 6, crystal_shard: 6 });
+    let st = g.gameState(); out.lanternOffer = !!rq.offer(st.world, st) && rq.active === 'req_second_lantern';
+    out.lantern = !!rq.complete(g.player.inventory, g.gameState()) && rq.unlocked.has('lantern_double');
+    st = g.gameState(); out.area = st.world.area; out.benchOffer = !!rq.offer(st.world, st) && rq.active === 'req_lakeside_bench';
+    out.bench = !!rq.complete(g.player.inventory, g.gameState()) && rq.unlocked.has('lakeside_bench');
+    st = g.gameState(); st.world.area = 'lanternmouth'; rq.done.delete('req_lakeside_bench'); rq.active = null;
+    out.benchOnlyAtGlowmere = !rq.available(st.world).some((r) => r.id === 'req_lakeside_bench'); rq.done.add('req_lakeside_bench');
+    const gm = g.glowmere.chamber, L = gm.lake, s = g.glowmere.seat;
+    // aim at the shore just outside the water (building in the lake is refused), bench rotated to face the water
+    g.build.toggle(); g.build.select('lakeside_bench');
+    let res = { ok: false }, inLake = null;
+    for (let k = 0; k < 24 && !res.ok; k++) {
+      const a = Math.atan2(s.stand.z - L.z, s.stand.x - L.x) + 0.7 + k * 0.25, d = L.r + 4.2;
+      g.player.pos.set(L.x + Math.cos(a) * d, 0, L.z + Math.sin(a) * d); g.player.pos.y = g.cave.floorAt(g.player.pos.x, g.player.pos.z);
+      g.player.yaw = Math.atan2(g.player.pos.x - L.x, g.player.pos.z - L.z); g.player.pitch = -0.5;
+      const want = Math.atan2(L.x - g.player.pos.x, L.z - g.player.pos.z); // bench front (+Z local) toward the lake
+      g.build.rot = ((Math.round(want / (Math.PI / 2)) % 4) + 4) % 4;
+      await wait(120);
+      if (g.build.target?.ok) res = g.build.place(g.player.inventory);
+      if (inLake == null) { // also: the planner refuses a spot in the water
+        const pl = { pos: new g.THREE.Vector3(L.x, 0, L.z + 2.2), forward: new g.THREE.Vector3(0, 0, -1), pitch: -0.5, yaw: 0, inventory: g.player.inventory };
+        inLake = g.build._plan(pl).ok === false;
+      }
+    }
+    out.placed = res.ok; out.lakeRefused = inLake; g.build.toggle();
+    if (res.ok) {
+      const bp = res.piece; out.benchDist = +(Math.hypot(bp.x - L.x, bp.z - L.z) - L.r).toFixed(2);
+      g.player.pos.set(bp.x - Math.sin(bp.yaw) * 1.0, 0, bp.z - Math.cos(bp.yaw) * 1.0); g.player.pos.y = g.cave.floorAt(g.player.pos.x, g.player.pos.z);
+      await wait(300); const seat = g.findSeat(); out.seat = seat?.label;
+      g.build.remove(g.player.inventory, bp, true);
+    }
+    rq.done = saveDone; rq.active = saveActive; rq.unlocked = saveUnl; rq.onChange?.();
+    return out;
+  });
+  m4.chain.pass = m4.chain.benchOnlyAtGlowmere && m4.chain.benchOffer && m4.chain.bench && m4.chain.lanternOffer && m4.chain.lantern && m4.chain.placed && m4.chain.lakeRefused && m4.chain.seat === 'Sit on the bench';
+  m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.chain.pass;
+}
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
@@ -478,7 +571,9 @@ m1.perf60 = await page.evaluate(async () => {
   g.player.pos.set(c.x + 4, g.cave.floorAt(c.x + 4, c.z + 4), c.z + 4); g.player.yaw = Math.atan2(-(c.x - g.player.pos.x), -(c.z - g.player.pos.z)); g.player.pitch = -0.25;
   await wait(1500);
   const i = g.renderer.info;
-  return { pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount };
+  const top = []; g.scene.traverseVisible((o) => { if (o.isMesh || o.isPoints) { const n = (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position?.count || 0) / 3; top.push([o.name || o.parent?.name || o.type, Math.round(n * (o.isInstancedMesh ? o.count : 1))]); } });
+  top.sort((a, b) => b[1] - a[1]);
+  return { pieces: B.pieces.length, counts: B.counts(), tries, calls: i.render.calls, tris: i.render.triangles, activePointLights: g.budget.activeCount, tod: Math.round(g.dayNight.tod), top: top.slice(0, 12) };
 });
 await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
 // ---------------------------------------------------------------- save → reload → Continue
@@ -504,6 +599,6 @@ await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
 
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ title, m2, m3, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, m3, m4, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !reload.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !m4.pass || !reload.pass ? 1 : 0);
