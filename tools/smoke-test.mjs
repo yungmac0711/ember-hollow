@@ -504,15 +504,15 @@ const m4 = {};
   await tapSel('#btn-interact'); await page.waitForTimeout(2200);
   Object.assign(m4.glowmere, await page.evaluate(() => { const g = __game, p = g.player;
     return { seated: !!p.seat, sitE: +(p.sitE || 0).toFixed(2), camBack: +Math.hypot(g.camera.position.x - p.pos.x, g.camera.position.z - p.pos.z).toFixed(2), sitTrig: g.ambient.log.some((l) => l.name === 'glowmere_sit'),
-      wren: g.wren.state, standIn: !!g.camStandIn?.root?.visible, fov: +g.camera.fov.toFixed(1), standLabel: document.querySelector('#btn-interact .label').textContent }; }));
+      wren: g.wren.state, standIn: !!g.cam?.root?.visible, camHood: g.cam?.hoodUp === g.wren.hoodUp && !!g.cam?.active?.root?.visible, camLights: (() => { let n = 0; g.cam?.root?.traverse((o) => { if (o.isLight) n++; }); return n; })(), fov: +g.camera.fov.toFixed(1), standLabel: document.querySelector('#btn-interact .label').textContent }; }));
   await page.screenshot({ path: OUT + 'test-output/14-glowmere-sit.png' });
   await touch('touchStart', [{ x: 150, y: 280, id: 1 }]);
   for (let k = 1; k <= 10; k++) { await touch('touchMove', [{ x: 150, y: 280 - k * 6, id: 1 }]); await page.waitForTimeout(40); }
   await page.waitForTimeout(300); await touch('touchEnd', []); await page.waitForTimeout(400);
-  m4.glowmere.stoodUp = await page.evaluate(() => !__game.player.seat && !__game.wren.seat && !__game.camStandIn?.root?.visible);
+  m4.glowmere.stoodUp = await page.evaluate(() => !__game.player.seat && !__game.wren.seat && !__game.cam?.root?.visible);
   const G = m4.glowmere;
   G.pass = G.area === 'glowmere' && G.enter && G.calls <= 60 && G.tris <= 80000 && G.lights <= 2 && G.note && G.label === 'Sit by the water' && G.seated && G.sitE > 0.9 && G.camBack > 1
-    && G.sitTrig && G.wren === 'seat' && G.standIn && G.wisps === 10 && G.standLabel === 'Stand up' && G.stoodUp;
+    && G.sitTrig && G.wren === 'seat' && G.standIn && G.camHood && G.camLights === 0 && G.wisps === 10 && G.standLabel === 'Stand up' && G.stoodUp;
   // Request chain: the lakeside bench (offered at the Glowmere) and the second lantern both finish; the bench seats two
   m4.chain = await page.evaluate(async () => {
     const g = __game, rq = g.requests, wait = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
@@ -568,7 +568,54 @@ const m4 = {};
   { const N = m4.night, near = (a, b) => Math.abs(a - b) < 0.03;
     N.pass = N.clear.b > 0.95 && N.clear.fireK > 0.99 && near(N.clear.hemi, 0.70) && N.clear.ground === '1a2230' && N.clear.fog === '2e3a52'
       && near(N.rain.hemi, 0.80) && N.rain.ground === '1e2838' && N.rain.fog === '34405a' && N.rain.lantern > 4.0 && N.rain.dist > 8.8; }
-  m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.night.pass && m4.chain.pass;
+  // Art final check: the 30° lean-to roof sits ridge-on-the-back-wall; a 2-cell cabin still covers for the rain
+  // mask / shelter audio and the last piece placed through the real Use path fires shelter_complete
+  m4.cabin = await page.evaluate(async () => {
+    const g = __game, B = g.build, cl = g.cave.clearing, G = 2, wait = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
+    const a = Math.round((cl.x - 3) / G), bj = Math.round((cl.z + 1) / G), X = (i) => i * G, Z = (j) => j * G;
+    const fake = (ax, az, fx, fz) => { const x = ax - fx * 1.6, z = az - fz * 1.6; return { pos: new g.THREE.Vector3(x, g.cave.floorAt(x, z), z), forward: new g.THREE.Vector3(fx, 0, fz), pitch: -0.3, yaw: Math.atan2(-fx, -fz), inventory: g.player.inventory }; };
+    const put = (type, ax, az, fx, fz) => { B.select(type); B.rot = 0; const t = B._plan(fake(ax, az, fx, fz)); if (!t.ok) return t.why; return B._add(t); };
+    const before = new Set(B.pieces); const log0 = g.ambient.log.length;
+    B.toggle();
+    const r = [];
+    for (const i of [a, a + 1]) r.push(put('floor', X(i), Z(bj), 0, -1));
+    r.push(put('wall', X(a), Z(bj) - 1, 0, -1), put('window', X(a + 1), Z(bj) - 1, 0, -1), put('wall', X(a) - 1, Z(bj), -1, 0), put('wall', X(a + 1) + 1, Z(bj), 1, 0));
+    r.push(put('wall', X(a + 1), Z(bj) + 1, 0, 1));
+    for (const i of [a, a + 1]) r.push(put('roof', X(i), Z(bj), 0, -1));
+    out.placed = r.map((p) => typeof p === 'string' ? p : p.type);
+    out.enclosedBefore = B.enclosedCells().size;
+    // the door last, through the real Use path (Cam inside, facing the front edge)
+    const px = X(a), pz = Z(bj) + 1 - 1.6; g.player.pos.set(px, B.heightAt ? B.heightAt(px, pz) : g.cave.floorAt(px, pz), pz); g.player.yaw = Math.PI; g.player.pitch = -0.3;
+    B.select('door'); await wait(200); out.doorPlan = B.target?.ok ? 'ok' : B.target?.why;
+    g.input.pressed.add('interact'); await wait(250);
+    B.toggle();
+    out.door = B.pieces.some((p) => p.type === 'door' && !before.has(p));
+    out.enclosed = B.enclosedCells().size;
+    out.shelterComplete = g.ambient.log.slice(log0).some((l) => l.name === 'shelter_complete');
+    const roofs = B.pieces.filter((p) => p.type === 'roof' && !before.has(p));
+    out.ridge = roofs.map((p) => [+Math.sin(p.yaw).toFixed(2), +Math.cos(p.yaw).toFixed(2)]); // local +Z (ridge) in world: back wall is −z
+    out.cover = roofs.every((p) => [[0, 0], [0.9, 0.9], [-0.9, 0.9], [0.9, -0.9], [-0.9, -0.9]].every(([dx, dz]) => B.underRoof({ x: p.x + dx, z: p.z + dz })));
+    out.outside = !B.underRoof({ x: X(a), z: Z(bj) + 2.4 });
+    const inside = { x: X(a) + 0.5, y: 0, z: Z(bj) }; out.inShelter = B.inShelter(inside);
+    out.rainRoofs = g.dayNight.rainU.uRoofN.value; out.rainRoofsAll = B.roofs().length;
+    // the rendered slab: eave over the front, ridge over the back wall, 30° pitch
+    const src = B.batches.roof.src.static[0].geometry; src.computeBoundingBox(); const bb = src.boundingBox;
+    out.slab = { rise: +(bb.max.y - bb.min.y).toFixed(2), run: +(bb.max.z - bb.min.z).toFixed(2) };
+    // Wren's lines: #151B24 @ 85% panel, #EADFC8 text, inside the viewport/safe area, above the frost vignette
+    g.hud.say('Bring me 3 glowcaps, would you? The stew wants them.', 3); await wait(600);
+    const se = document.getElementById('subtitle'), cs = getComputedStyle(se), rr = se.getBoundingClientRect();
+    out.sub = { bg: cs.backgroundColor, color: getComputedStyle(se.querySelector('.line')).color, radius: cs.borderRadius, op: cs.opacity,
+      inside: rr.left >= 0 && rr.right <= innerWidth && rr.top >= 0 && rr.bottom <= innerHeight, frostUnder: +getComputedStyle(document.getElementById('frost')).zIndex < +getComputedStyle(document.getElementById('hud')).zIndex };
+    for (const p of B.pieces.filter((q) => !before.has(q)).reverse()) B.remove({}, p, true);
+    out.cleaned = B.pieces.length === before.size;
+    return out;
+  });
+  { const C = m4.cabin; C.pass = !C.placed.some((t) => / /.test(t))
+      && C.enclosedBefore === 0 && C.doorPlan === 'ok' && C.door && C.enclosed === 2 && C.shelterComplete && C.inShelter
+      && C.rainRoofs === C.rainRoofsAll && C.rainRoofs >= 2 && C.ridge.length === 2 && C.ridge.every(([sx, cz]) => Math.abs(sx) < 0.01 && cz < -0.99) && C.cover && C.outside && C.cleaned
+      && C.slab.rise > 1.1 && C.slab.rise < 1.45 && C.slab.run > 1.9
+      && C.sub.bg === 'rgba(21, 27, 36, 0.85)' && C.sub.color === 'rgb(234, 223, 200)' && C.sub.op === '1' && C.sub.inside && C.sub.frostUnder; }
+  m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.night.pass && m4.cabin.pass && m4.chain.pass;
 }
 
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });

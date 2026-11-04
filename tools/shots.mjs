@@ -61,7 +61,8 @@ const cabin = await page.evaluate(() => {
 });
 console.log('cabin', JSON.stringify(cabin));
 await page.waitForTimeout(6000);
-await page.evaluate(() => { const g = __game; const p = g.build.pieces.find((q) => q.type === 'hearth'); g.wren.pos.set(p.x - 1.3, g.wren.pos.y, p.z + 0.1); g.puppy.pos.set(p.x - 0.6, g.puppy.pos.y, p.z + 0.8); });
+await page.evaluate(() => { const g = __game; const p = g.build.pieces.find((q) => q.type === 'hearth'); g.wren.pos.set(p.x - 1.3, g.wren.pos.y, p.z + 0.1); g.puppy.pos.set(p.x - 0.6, g.puppy.pos.y, p.z + 0.8);
+  g.ambient.sayNow('Walls, roof, door. Cam, we have a home.', 'shot'); g.hud._subT = 12; }); // subtitle on screen at capture (not mid-fade)
 await page.waitForTimeout(1500);
 await page.screenshot({ path: OUT + 'm1-cabin-hearth.png' }); console.log('saved m1-cabin-hearth.png');
 
@@ -71,6 +72,7 @@ await shot('m1-clearing-night.png', () => {
   g.dayNight.tod = 960; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0; g.dayNight.rainL = 0;
   h.stand(cl.x + 6, cl.z - 5, cl.x - 4, cl.z + 6, 0.32);
   h.friends(cl.x + 4.2, cl.z - 2.6, cl.x + 5.2, cl.z - 3.2);
+  g.ambient.sayNow('Stars, Cam. Look up.', 'shot'); g.hud._subT = 12;
 }, 4000);
 
 // 2b. the clearing on a rainy night (§8.3 rain floor): Wren, Biscuit and the near ground should read
