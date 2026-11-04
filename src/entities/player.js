@@ -14,7 +14,7 @@ export class Player {
     this.onGround = false;
     this.speed = 0;                   // current horizontal speed (for puppy logic)
     this.stillTime = 0;
-    this.inventory = { wood: 0, stone: 0, flint: 0, mushroom: 0, glowcap: 0, crystal_shard: 0, stew: 0 };
+    this.inventory = { wood: 0, stone: 0, flint: 0, mushroom: 0, glowcap: 0, crystal_shard: 0, stew: 0, hand_lantern: 1 }; // M2: the lantern is there from the first second
     this._bob = 0;
     this._s = {};
     this.camera.rotation.order = 'YXZ';

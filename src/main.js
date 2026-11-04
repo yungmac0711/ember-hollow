@@ -15,6 +15,8 @@ import { Items, ITEM_INFO } from './entities/items.js';
 import { Puppy, buildPuppyPrimitive } from './entities/puppy.js';
 import { FireSystem } from './fire/campfire.js';
 import { CamSeated } from './companion/cam.js';
+import { HandLantern } from './companion/hand-lantern.js';
+import { loadIconAtlas } from './ui/icons.js';
 import { Wren, buildWrenPrimitive } from './companion/wren.js';
 import { createAdapter } from './companion/llm/index.js';
 import { CompanionMemory } from './companion/memory.js';
@@ -133,8 +135,8 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
-  const [surfParts, stewPotP, camSitUp, camSitDown] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
-    loadScene('camSit'), loadScene('camSitHoodDown')]); // Cam, seated only (Art's cam-sit*.glb, provisional look)
+  const [surfParts, stewPotP, camSitUp, camSitDown, handLanternM] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
+    loadScene('camSit'), loadScene('camSitHoodDown'), loadScene('handLantern'), loadIconAtlas()]); // Cam, seated only (Art's cam-sit*.glb, provisional look)
   const gmP = {}; // Chunk D: the Glowmere set
   await Promise.all(['water', 'rock1', 'rock2', 'cap1', 'cap2', 'cap3', 'reeds', 'lily1', 'lily2'].map(async (k) => {
     gmP[k] = await loadParts('gm' + k[0].toUpperCase() + k.slice(1), raw);
@@ -186,7 +188,10 @@ async function init() {
   const hoodUp = wrenHood?.root.getObjectByName('hood_up') || null;
   const wrenModel = wrenScene ? { ...wrenScene, hoodUp } : { root: buildWrenPrimitive().root, animations: [] };
   const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
-  const cam = new CamSeated(scene, camSitUp, camSitDown);
+  hud.initGlyphs();
+  // M2 chunk A: Cam's hand lantern (first-person prop + one budget emitter; seated Cam holds a copy)
+  const lantern = new HandLantern(camera, handLanternM, budget);
+  const cam = new CamSeated(scene, camSitUp, camSitDown, () => lantern.makeSeated());
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
@@ -235,7 +240,7 @@ async function init() {
       inShelter,
       weather: dayNight.weather,
       warmth: warmWord,
-      inventory: { ...player.inventory },
+      inventory: { ...player.inventory }, lanternOn: lantern.on,
       biscuit: puppy.mood,
       dayCount,
       fog: fogState(),
@@ -277,6 +282,7 @@ async function init() {
   const invUI = new InventoryUI({
     onSelectPiece: (t) => { build.select(t); hud.setRemoveActive(false); invUI.setPalette(t, player.inventory); },
     onStick: () => throwStick(),
+    onLantern: () => toggleLantern(),
     onReadNote: (id) => openNote(id),
     isAvailable: (t, inv) => {
       const P = PIECES[t];
@@ -306,6 +312,21 @@ async function init() {
   const woofEl = document.getElementById('woof');
   let woofT = 0;
   puppy.onBark = () => { woofT = 1.3; woofEl.classList.add('show'); audio.bark?.(); };
+  // M2 chunk A: light / stow Cam's hand lantern; if it's gone (left in a chest) make a new one
+  function toggleLantern() {
+    const inv = player.inventory;
+    if (!((inv.hand_lantern || 0) > 0)) {
+      const R = CONFIG.handLantern.recipe, cost = Object.entries(R).map(([k, n]) => `${n} ${ITEM_INFO[k]?.label || k}`).join(' + ');
+      if (!Object.entries(R).every(([k, n]) => (inv[k] || 0) >= n)) { hud.toast(`Hand lantern: needs ${cost}`, 2.4); return false; }
+      for (const [k, n] of Object.entries(R)) inv[k] -= n;
+      inv.hand_lantern = 1; lantern.has = true; lantern.on = true; audio.blip(640);
+      hud.toast('🏮 You make a small, plain lantern', 2.2); invUI.setInventory(inv); return true;
+    }
+    lantern.has = true;
+    const on = lantern.toggle(); audio.blip(on ? 640 : 420);
+    hud.toast(on ? 'Lantern lit' : 'Lantern stowed', 1.0);
+    return on;
+  }
   function throwStick() {
     if (!running || paused) return;
     const st = puppy.stick;
@@ -358,6 +379,7 @@ async function init() {
     return true;
   }
   onTap(rqGive, () => completeRequest());
+  let rqShowT = 0;
   function updateRequests(dt) {
     const inv = player.inventory, dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
     // offer when Cam idles near Wren
@@ -369,8 +391,9 @@ async function init() {
     const pr = requests.progress(inv);
     let html = '';
     if (pr) html = pr.rows.map((r) => `<span class="${r.have >= r.need ? 'ok' : ''}">${ITEM_INFO[r.item]?.label || r.item} ${r.have}/${r.need}</span>`).join(' · ');
-    rqEl.classList.toggle('hidden', !pr);
-    if (pr && html !== rqHtml) { rqTitle.textContent = `Wren: ${pr.r.title}`; rqNeeds.innerHTML = html; rqHtml = html; }
+    if (pr && html !== rqHtml) { rqTitle.textContent = `Wren: ${pr.r.title}`; rqNeeds.innerHTML = html; rqHtml = html; rqShowT = 6; }
+    rqShowT -= dt;
+    rqEl.classList.toggle('hidden', !pr || (dw > 6 && rqShowT <= 0 && !pr.ready)); // M2: minimal HUD
     rqGive.classList.toggle('hidden', !(pr?.ready && dw < 4));
   }
 
@@ -414,6 +437,8 @@ async function init() {
     const inv = player.inventory;
     for (const k of Object.keys(inv)) inv[k] = 0;
     Object.assign(inv, d.inventory || {});
+    if (d.inventory?.hand_lantern == null) inv.hand_lantern = 1; // M2: older saves get the starter lantern
+    lantern.on = d.lanternOn !== false;
     build.clearAll();
     build.restore(d.pieces || []);
     for (const h of d.hearths || []) { const p = build.pieces.find((q) => q.id === h.id); if (p?.fire) p.fire.fuel = h.fuel || 0; }
@@ -465,6 +490,7 @@ async function init() {
     apply: (st) => {
       audio.setVolumes({ master: st.master, music: st.music, effects: st.effects }); input.sens = st.sens; player.invertY = !!st.invertY;
       hud.setFps(!!st.showFps || CONFIG.debug.fps);
+      hud.setLayout(st);
       // polish: the graphics tier applies its pixel ratio + cull distances live (light pool: on restart)
       const low = tierLow(st.tier);
       if (low !== TIER.live || !settingsApplied) {
@@ -910,6 +936,7 @@ async function init() {
     });
   }
 
+  let hintNudged = false;
   function updateHint() {
     const inv = player.inventory;
     invUI.setInventory(inv);
@@ -917,7 +944,7 @@ async function init() {
     invUI.setStickOut(puppy.stick.state !== 'hand');
     if (build.active) {
       hud.setHint(build.removeMode ? 'Remove mode: aim at a piece, then Use for a full refund. 🗑 to go back.'
-        : `${PIECES[build.selected].name}: ${build.costText()}. ⟳ rotate · 🗑 remove · 🔨 done`);
+        : `${PIECES[build.selected].name}: ${build.costText()}. ⟳ rotate · 🗑 remove · 🔨 done`, true);
       invUI.setPalette(build.selected, inv);
     }
     else if (!fires.fires.length) hud.setHint(`Light a campfire: wood ${Math.min(inv.wood, FC.woodToBuild)}/${FC.woodToBuild} · flint ${Math.min(inv.flint, FC.flintToBuild)}/${FC.flintToBuild}${inv.flint < 1 ? ' (look on Flintseam Ridge)' : ''}`);
@@ -925,6 +952,9 @@ async function init() {
     else hud.setHint('Keep the fire fed. Hold Use on trees and rocks to gather, 🔨 to build.');
     const nf = fires.nearest(player.pos, 14);
     hud.setFuel(nf);
+    // the hint comes back once if Cam stands still a good while
+    if (player.stillTime > 25 && !hintNudged) { hintNudged = true; hud.nudgeHint(); } else if (player.stillTime < 1) hintNudged = false;
+    invUI.setLantern(lantern.lit, lantern.has);
   }
 
   // ------------------------------------------------------------ loop
@@ -950,6 +980,8 @@ async function init() {
         hud.toast(on ? 'Build mode: pick a piece below' : 'Build mode off', 1.8);
       }
       if (input.consume('bag')) invUI.toggleBag();
+      if (input.consume('lantern')) toggleLantern();
+      if (input.consume('hidehud')) settings.setHideHud(!settings.s.hideHud);
       if (build.active) {
         if (input.consume('rotate')) build.rotate();
         if (input.consume('remove')) hud.setRemoveActive(build.setRemove());
@@ -994,13 +1026,17 @@ async function init() {
     ambientLight.update(dt, player.pos, fires); // §8.1 distance-driven ambient
     puppy.update(dt, player, fires);
     wren.update(dt, player, fires, chat.open, {
-      fog: fogState(), items: running ? items : null, nightSurface: dayNight.nightness * dayNight.b,
+      fog: fogState(), items: running ? items : null, nightSurface: dayNight.nightness * dayNight.b, camera, camLantern: lantern.k,
       onGather: (it) => {
         items.pickUp(it); player.inventory[it.kind] = (player.inventory[it.kind] || 0) + 1;
         hud.toast(`Wren hands you ${ITEM_INFO[it.kind].label}`, 1.8); audio.blip(600);
       },
     });
-    cam.update(dt, player.seat, wren.hoodUp); // after Wren, so Cam's hood matches hers this frame
+    cam.update(dt, player.seat, wren.hoodUp, lantern.lit); // after Wren, so Cam's hood matches hers this frame
+    lantern.has = (player.inventory.hand_lantern || 0) > 0;
+    { const lf = fires.nearest(player.pos, Infinity, true);
+      lantern.update(dt, { player, seated: cam.lamp, inFire: !!lf && Math.hypot(player.pos.x - lf.pos.x, player.pos.z - lf.pos.z) < lf.lightRadius,
+        nightSurface: dayNight.nightness * dayNight.b, daylight: (1 - dayNight.nightness) * dayNight.b, hideFp: !running, floorAt: (x, z) => Math.max(cave.floorAt(x, z), build.heightAt(x, z)) }); }
     decor.update(dt);
     dressing.update(dt, { anyFireLit: anyLit });
     budget.update(dt, camera.getWorldPosition(_camPos));
@@ -1009,7 +1045,7 @@ async function init() {
     const cp = camera.getWorldPosition(_camPos);
     dayNight.update(dt, { advance: running && !sleeping, camPos: cp, hemi, fog: scene.fog, scene, fireK: ambientLight.k, caveDensity: scene.fog.density, renderer });
     surface.update(dt, cp, camera); instCull.update(dt, camera);
-    glowmere.update(dt, player.pos, { lanternOn: Math.min(1, wren.lightOn), sitting: !!player.seat && glowmere.weight(player.pos) > 0.3 });
+    glowmere.update(dt, player.pos, { lanternOn: Math.min(1, Math.max(wren.lightOn, lantern.k)), sitting: !!player.seat && glowmere.weight(player.pos) > 0.3 });
     { // fireflies: the grotto (25, cyan) or the clearing at dusk (40, warm); none in the caves
       const gw = glowmere.weight(player.pos);
       const dusk = timeWord(dayNight.tod) === 'dusk' && dayNight.b > 0.3;
@@ -1025,7 +1061,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { cam, settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { cam, lantern, toggleLantern: () => toggleLantern(), settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });

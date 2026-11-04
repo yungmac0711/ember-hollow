@@ -32,18 +32,27 @@
   <div id="touch-layer"></div>
 
   <div id="hud">
-    <div id="hint"></div>
     <div id="area-name"></div>
     <div id="toast"></div>
     <div id="subtitle"><span class="who">Wren</span><span class="line"></span></div>
-    <div id="fuel" class="hidden"><div class="label">Campfire</div><div class="bar"><div class="fill"></div></div></div>
     <div id="crosshair"></div>
     <div id="tip"></div>
     <div id="woof">woof!</div>
-    <div id="request" class="hidden"><div class="rq-title"></div><div class="rq-needs"></div><button class="rq-give hidden" id="rq-give">Give to Wren</button></div>
     <div id="fps" class="hidden"></div>
-    <div id="warmth" aria-label="Warmth"><span class="tod" id="tod-ico">☀</span><span class="ico">🌡</span><div class="bar"><div class="fill"></div></div></div>
-    <button id="btn-pause" aria-label="Pause">⏸</button>
+    <!-- M2 chunk A: minimal HUD. Top left: only what matters right now (cold, fire fuel nearby, Wren's
+         request near her, a hint that fades); top right: small translucent buttons (pause, pack, build, talk) -->
+    <div id="hud-tl">
+      <div id="warmth" aria-label="Warmth"><span class="tod hidden" id="tod-ico"></span><span class="ico"></span><div class="bar"><div class="fill"></div></div></div>
+      <div id="fuel" class="hidden"><span class="ico"></span><div class="label">Campfire</div><div class="bar"><div class="fill"></div></div></div>
+      <div id="request" class="hidden"><div class="rq-title"></div><div class="rq-needs"></div><button class="rq-give hidden" id="rq-give">Give to Wren</button></div>
+      <div id="hint"></div>
+    </div>
+    <div id="hud-col">
+      <button id="btn-pause" class="hbtn" aria-label="Pause"></button>
+      <button id="btn-bag" class="hbtn" aria-label="Pack"></button>
+      <button class="hbtn" id="btn-build" aria-label="Build"></button>
+      <button class="hbtn" id="btn-chat" aria-label="Talk"></button>
+    </div>
 
     <div id="joystick" class="hidden"><div class="knob"></div></div>
     <div id="ring" class="hidden"><div class="fill"></div><span class="ico"></span></div>
@@ -53,8 +62,6 @@
     <div id="palette" class="bar-ui scroll hidden"></div>
 
     <div id="buttons">
-      <button class="btn small" id="btn-chat" aria-label="Talk">💬</button>
-      <button class="btn small" id="btn-build" aria-label="Build">🔨</button>
       <button class="btn small build-only" id="btn-rotate" aria-label="Rotate piece">⟳</button>
       <button class="btn small build-only" id="btn-remove" aria-label="Remove mode">🗑</button>
       <button class="btn" id="btn-interact" aria-label="Interact"><span class="label">Use</span></button>
@@ -93,6 +100,7 @@
       <label class="srow"><span>Effects</span><input type="range" id="set-effects" min="0" max="100" step="1" /><output id="set-effects-v"></output></label>
       <label class="srow"><span>Look sensitivity</span><input type="range" id="set-sens" min="30" max="250" step="5" /><output id="set-sens-v"></output></label>
       <div class="srow srow2"><span>Invert look Y</span><button class="sbtn" id="set-invert" aria-pressed="false">Off</button><span>Show FPS</span><button class="sbtn" id="set-fps" aria-pressed="false">Off</button></div>
+      <div class="srow srow2"><span>HUD size</span><div class="seg" id="set-hud"><button class="sbtn" data-hud="small">S</button><button class="sbtn" data-hud="medium">M</button><button class="sbtn" data-hud="large">L</button></div><span>Hide HUD</span><button class="sbtn" id="set-hidehud" aria-pressed="false">Off</button></div>
       <div class="srow"><span>Graphics</span><div class="seg" id="set-tier"><button class="sbtn" data-tier="auto">Auto</button><button class="sbtn" data-tier="low">Low</button><button class="sbtn" data-tier="high">High</button></div></div>
       <p class="pause-note" id="set-note"></p>
       <button class="tbtn hidden" id="set-reload">Restart to apply lights</button>

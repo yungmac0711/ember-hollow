@@ -1,5 +1,8 @@
 // DOM HUD (inventory/hotbar lives in inventory-ui.js): hints, toasts, Wren subtitles, area names, campfire fuel, FPS counter.
 import { CONFIG, TIER } from '../config.js';
+import { iconHtml } from '../build/pieces.js';
+
+export const HUD_SCALE = { small: 0.85, medium: 1, large: 1.15 };
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,6 +18,22 @@ export class HUD {
     this._ft = new Float32Array(600); this._fi = 0; this._fn = 0; this._prev = 0; // last ~10 s of frame times
     this._last = {}; this._toastT = 0; this._subT = 0; this._areaT = 0;
     this._frames = 0; this._fpsT = 0;
+    this._hintT = 0; this._hintSticky = false;
+  }
+
+  /** M2 chunk A: small translucent buttons drawn from Art's ui_ glyphs (call once the atlas is loaded). */
+  initGlyphs() {
+    const glyph = (id, key, alt) => { const el = $(id); if (el) el.innerHTML = iconHtml(key) || alt; };
+    glyph('btn-pause', 'ui_menu', '⏸'); glyph('btn-build', 'ui_craft', '🔨');
+    $('btn-chat').innerHTML = '<span class="ico">💬</span>';
+    const w = $('warmth'); w.querySelector('.ico').innerHTML = iconHtml('ui_warmth');
+    this.fuel.querySelector('.ico').textContent = '🔥';
+  }
+
+  /** HUD size (S/M/L) and the hide-HUD toggle (Settings, or H on a keyboard). */
+  setLayout({ hudScale = 'medium', hideHud = false } = {}) {
+    document.documentElement.style.setProperty('--hs', String(HUD_SCALE[hudScale] || 1));
+    document.body.classList.toggle('hud-hidden', !!hideHud);
   }
 
   /** Settings → Show FPS (or ?fps=1): small top-right readout, safe-area aware (css #fps). */
@@ -23,7 +42,14 @@ export class HUD {
     this._frames = 0; this._fpsT = 0; this._fn = 0; this._prev = 0;
   }
 
-  setHint(text) { if (this.hint.textContent !== text) this.hint.textContent = text; }
+  /** Hints are transient now: shown ~6 s when they change (sticky while building), then fade. */
+  setHint(text, sticky = false) {
+    if (this.hint.textContent !== text) { this.hint.textContent = text; this._hintT = 6; }
+    this._hintSticky = sticky;
+    this.hint.classList.toggle('show', !!text && (sticky || this._hintT > 0));
+  }
+  /** Bring the current hint back for a few seconds (Cam idle for a while). */
+  nudgeHint(secs = 5) { if (this.hint.textContent) { this._hintT = secs; this.hint.classList.add('show'); } }
 
   setInteract(label) {
     const l = label || 'Use';
@@ -52,6 +78,7 @@ export class HUD {
 
   update(dt, renderer) {
     if (this._toastT > 0 && (this._toastT -= dt) <= 0) this.toastEl.classList.remove('show');
+    if (this._hintT > 0 && (this._hintT -= dt) <= 0 && !this._hintSticky) this.hint.classList.remove('show');
     if (this._subT > 0 && (this._subT -= dt) <= 0) this.sub.classList.remove('show');
     if (this._areaT > 0 && (this._areaT -= dt) <= 0) this.area.classList.remove('show');
     if (this.showFps) {

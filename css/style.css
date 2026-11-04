@@ -196,3 +196,108 @@ body.on-title #warmth { visibility: hidden; }
 .sbtn { min-width: 64px; min-height: 38px; padding: 6px 12px; border-radius: 10px; border: 1.5px solid rgba(255,190,120,0.45); background: rgba(34,24,16,0.7); color: #ffe6c4; font: 700 14px/1 inherit; font-family: inherit; touch-action: manipulation; }
 .sbtn.on, .sbtn[aria-pressed=true] { background: linear-gradient(180deg, rgba(224,138,46,0.92), rgba(170,92,30,0.92)); border-color: #ffc27a; color: #fff; }
 #set-reload { align-self: center; }
+
+/* ================= M2 chunk A: minimal HUD (art/assets/ui/UI_KIT.md + previews/ui-hud-mock.png) =================
+   Cameron: the hotbar sat too high and the UI was too invasive. Everything is smaller, translucent and
+   anchored to the edges; persistent text became toasts / fading hints. No backdrop-filter on anything
+   that is always on screen (it costs frames over WebGL on iPhone); modal panels only, high tier only. */
+:root { --hs: 1; --eh-amber: #e08a2e; --eh-ember: #ff7a1a; --eh-text: #eadfc8; }
+.ico-sp { display: inline-block; width: var(--is, 32px); height: var(--is, 32px); flex: 0 0 auto; pointer-events: none;
+  background: url(../icons/atlas.png) no-repeat;
+  background-size: calc(var(--is, 32px) * var(--aw)) calc(var(--is, 32px) * var(--ah));
+  background-position: calc(var(--is, 32px) * var(--ax) * -1) calc(var(--is, 32px) * var(--ay) * -1); }
+/* panels: dark glass, amber edge (CSS recipe from the kit) */
+.eh-panel, .panel, #chat { background: linear-gradient(180deg, rgba(39,45,54,.9) 0%, rgba(21,27,36,.9) 45%, rgba(21,27,36,.9) 100%);
+  border: 1px solid rgba(224,138,46,.75); border-radius: 12px; color: var(--eh-text);
+  box-shadow: inset 0 0 8px rgba(224,138,46,.28), inset 0 1px 0 rgba(234,223,200,.08), 0 4px 14px rgba(0,0,0,.45); }
+#chat { -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.tier-high .panel { -webkit-backdrop-filter: blur(10px) saturate(1.1); backdrop-filter: blur(10px) saturate(1.1); }
+.eh-panel.is-selected, .slot-grid .slot.sel { border: 1.5px solid var(--eh-ember); box-shadow: inset 0 0 12px rgba(255,122,26,.55), 0 0 10px rgba(255,122,26,.35), 0 4px 14px rgba(0,0,0,.45); }
+.eh-panel.is-disabled { border-color: rgba(62,74,87,.8); box-shadow: 0 4px 14px rgba(0,0,0,.4); background: rgba(21,27,36,.70); color: rgba(234,223,200,.45); }
+.panel-head { border-bottom-color: rgba(224,138,46,.22); }
+
+/* ---- hotbar: slim, low (safe area + 6 px), built from the hotbar_* frames ---- */
+.bar-ui { bottom: calc(6px + var(--sab)); gap: 4px; padding: 6px; border-radius: 14px; background: none;
+  border: 1px solid transparent; border-image: url(../assets/ui/hotbar_bar@3x.png) 48 fill / 14px / 0 stretch;
+  transform: translateX(-50%) scale(var(--hs)); transform-origin: 50% 100%; transition: opacity .6s ease; --is: 32px; }
+#hotbar.idle { opacity: .45; }
+.slot { width: 44px; height: 44px; border-radius: 8px; border: none; font-size: 20px;
+  background: url(../assets/ui/hotbar_slot@3x.png) center / 44px 44px no-repeat; }
+.slot.sel { box-shadow: none; background-image: url(../assets/ui/hotbar_slot_selected@3x.png); }
+.slot.lantern.on { background-image: url(../assets/ui/hotbar_slot_selected@3x.png); }
+.slot.lantern:not(.on) .ico-sp, .slot.lantern:not(.on) .ico-img { opacity: .55; filter: saturate(.4); }
+.slot .ico-img { width: 32px; height: 32px; }
+.slot .n { right: -2px; bottom: -2px; width: 18px; height: 18px; line-height: 18px; text-align: center; padding: 0;
+  font-size: 10.5px; font-weight: 700; color: var(--eh-text); text-shadow: none; letter-spacing: -.02em;
+  background: url(../assets/ui/hotbar_badge@3x.png) center / 18px 18px no-repeat; pointer-events: none; }
+.slot.empty { opacity: 1; }
+.slot.empty .n { display: none; }
+.slot.empty > .ico-sp, .slot.empty > .ico-img, .slot.empty > .ico { opacity: .35; }
+.slot.empty::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: url(../assets/ui/hotbar_overlay_empty@3x.png) center / 44px 44px no-repeat; }
+.slot.action { border-style: none; }
+.slot .cd { position: absolute; inset: 0; pointer-events: none; opacity: 0; border-radius: 8px;
+  background: url(../assets/ui/hotbar_overlay_cooldown@3x.png) center / 44px 44px no-repeat;
+  -webkit-mask: conic-gradient(#000 calc(var(--cd, 0) * 1turn), transparent 0); mask: conic-gradient(#000 calc(var(--cd, 0) * 1turn), transparent 0); }
+.slot.action.cant { opacity: 1; }
+.slot.action.cant .cd { opacity: 1; }
+.slot.has-cost { padding-bottom: 8px; --is: 28px; }
+.slot.has-cost .ico-img { width: 28px; height: 28px; }
+.slot .c { font-size: 8px; bottom: 2px; }
+.bar-ui.scroll { max-width: min(460px, calc(100vw - 300px - var(--sal) - var(--sar))); }
+.slot-grid .slot { background-color: rgba(21,27,36,.6); }
+.bag-row { --is: 30px; }
+
+/* ---- top right: small translucent buttons (pause, pack, build, talk) ---- */
+#hud-col { position: absolute; top: calc(8px + var(--sat)); right: calc(10px + var(--sar)); display: flex; flex-direction: column; gap: 8px;
+  transform: scale(var(--hs)); transform-origin: 100% 0; pointer-events: none; }
+.hbtn, #hud-col .btn { pointer-events: auto; position: static; width: 38px; height: 38px; padding: 0; border-radius: 10px; touch-action: none;
+  display: flex; align-items: center; justify-content: center; color: var(--eh-text); font-size: 17px; font-family: inherit;
+  background: rgba(21,27,36,.5); border: 1px solid rgba(224,138,46,.45); box-shadow: inset 0 0 6px rgba(224,138,46,.18); --is: 26px; opacity: .8; }
+.hbtn .ico { font-size: 17px; }
+.hbtn.active, #btn-build.active { opacity: 1; background: rgba(21,27,36,.75); border: 1.5px solid var(--eh-ember); box-shadow: inset 0 0 10px rgba(255,122,26,.5), 0 0 8px rgba(255,122,26,.3); }
+#btn-pause { position: static; top: auto; right: auto; width: 38px; height: 38px; border-radius: 10px; border: 1px solid rgba(224,138,46,.45); font-size: 17px; }
+#fps { top: calc(8px + var(--sat)); right: calc(68px + var(--sar)); }
+
+/* ---- bottom right: smaller, translucent action buttons ---- */
+#buttons { right: calc(12px + var(--sar)); bottom: calc(12px + var(--sab)); width: 150px; height: 150px; transform: scale(var(--hs)); transform-origin: 100% 100%; }
+.btn { background: rgba(21,27,36,.38); border: 1.5px solid rgba(224,138,46,.38); }
+#btn-jump { right: 0; bottom: 0; width: 60px; height: 60px; font-size: 24px; }
+#btn-interact { right: 68px; bottom: 14px; width: 64px; height: 64px; font-size: 11px; padding: 4px; }
+#btn-interact.ready { border-color: var(--eh-amber); box-shadow: 0 0 10px rgba(255,150,60,.4); background: rgba(21,27,36,.55); }
+#btn-rotate { right: 4px; bottom: 70px; width: 40px; height: 40px; font-size: 18px; }
+#btn-remove { right: 4px; bottom: 118px; width: 40px; height: 40px; font-size: 16px; }
+
+/* ---- top left: only when it matters (cold, a fire close by, Wren's request near her, a fading hint) ---- */
+#hud-tl { position: absolute; top: calc(8px + var(--sat)); left: calc(10px + var(--sal)); display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  max-width: min(300px, 38vw); transform: scale(var(--hs)); transform-origin: 0 0; pointer-events: none; }
+#hud-tl > * { position: static; transform: none; }
+#warmth { display: none; top: auto; right: auto; padding: 3px 8px 3px 4px; border-radius: 10px; gap: 4px; background: rgba(21,27,36,.55); border: 1px solid rgba(159,208,255,.55); box-shadow: none; --is: 22px; }
+#warmth.cold { display: flex; box-shadow: none; }
+#warmth .ico { opacity: 1; display: flex; }
+#warmth .bar { width: 46px; height: 4px; }
+#fuel { left: auto; top: auto; width: auto; display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 10px; font-size: 10.5px; background: rgba(21,27,36,.5); border: 1px solid rgba(224,138,46,.35); opacity: .85; }
+#fuel .ico { font-size: 12px; }
+#fuel .label { white-space: nowrap; opacity: .9; }
+#fuel .bar { width: 46px; height: 4px; margin: 0; }
+#request { top: auto; left: auto; max-width: 100%; padding: 5px 9px; font-size: 11.5px; background: rgba(21,27,36,.6); border-color: rgba(224,138,46,.4); border-radius: 10px; }
+#hint { top: auto; left: auto; max-width: 100%; font-size: 12px; line-height: 1.3; padding: 4px 9px; border-radius: 10px; background: rgba(21,27,36,.5); border: 1px solid rgba(234,223,200,.12);
+  opacity: 0; transition: opacity .6s; text-shadow: 0 1px 2px #000; }
+#hint.show { opacity: .9; }
+#hint:empty { display: none; }
+
+/* ---- Wren's lines: top centre pill (mock); toasts: small pill just above the hotbar ---- */
+#subtitle { bottom: auto; top: calc(8px + var(--sat)); max-width: min(520px, calc(100vw - 2 * max(330px, 38vw) + 40px), calc(100vw - 120px - var(--sal) - var(--sar)));
+  border-radius: 12px; padding: 6px 12px; font-size: 14px; border-color: rgba(224,138,46,.55); }
+#toast { left: 50%; width: auto; max-width: min(460px, 70vw); transform: translateX(-50%); bottom: calc(66px + var(--sab)); font-size: 13px; padding: 4px 12px; border-radius: 10px;
+  background: rgba(21,27,36,.6); border: 1px solid rgba(224,138,46,.3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toast:empty { display: none; }
+#tip { font-size: 12px; }
+#crosshair { width: 4px; height: 4px; margin: -2px 0 0 -2px; background: rgba(255,230,200,.45); }
+#area-name { font-size: 22px; top: 16%; }
+
+/* ---- Settings → Hide HUD (H on a keyboard): only a faint pause button stays ---- */
+body.hud-hidden #hotbar, body.hud-hidden #palette, body.hud-hidden #buttons, body.hud-hidden #hud-tl, body.hud-hidden #crosshair,
+body.hud-hidden #btn-bag, body.hud-hidden #btn-build, body.hud-hidden #btn-chat, body.hud-hidden #toast { visibility: hidden; }
+body.hud-hidden #btn-pause { opacity: .3; }
+.srow { min-height: 36px; }
+.settings-body { gap: 6px; }

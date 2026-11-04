@@ -8,6 +8,9 @@ import { PIECES, PIECE_ORDER, KEEPSAKES, costText, iconHtml } from '../build/pie
 
 const $ = (id) => document.getElementById(id);
 export const HOTBAR = ['wood', 'stone', 'flint', 'mushroom', 'glowcap', 'crystal_shard', 'stew'];
+// M2 chunk A: the slim hotbar only shows what Cam carries (wood/stone/flint keep a ghost slot)
+const ALWAYS = new Set(['wood', 'stone', 'flint']);
+const IDLE_MS = 4000; // then the bar fades to .45 until touched or the pack changes
 export const DECOR = PIECE_ORDER.filter((t) => PIECES[t].decor);
 const STORABLE = () => [...Object.keys(ITEM_INFO), ...DECOR, ...KEEPSAKES.map((k) => k.id)];
 
@@ -22,7 +25,7 @@ const shortCost = (c) => Object.entries(c).map(([k, n]) => (PIECES[k] ? `×${n}`
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class InventoryUI {
-  constructor({ onSelectPiece, onStore, onTake, onPanel, onStick, onSelect, onReadNote, isAvailable }) {
+  constructor({ onSelectPiece, onStore, onTake, onPanel, onStick, onSelect, onReadNote, isAvailable, onLantern }) {
     this.hotbar = $('hotbar'); this.palette = $('palette'); this.ring = $('ring');
     this.bag = $('bag'); this.bagList = $('bag-list');
     this.chest = $('chestui'); this.chestPack = $('chest-pack'); this.chestStore = $('chest-store');
@@ -33,15 +36,21 @@ export class InventoryUI {
     this.isAvailable = isAvailable || ((t) => !PIECES[t].locked && !PIECES[t].decor && !PIECES[t].keepsake);
     this.journal = []; // [{id, title}]
     const stop = (e) => { e.stopPropagation(); };
-    // hotbar
+    // hotbar: Cam's hand lantern first (tap: light / stow; empty ring = lost, tap to make one)
     this.slots = {};
+    const lb = document.createElement('button');
+    lb.className = 'slot lantern on'; lb.dataset.kind = 'hand_lantern'; lb.id = 'slot-lantern';
+    lb.title = `${label('hand_lantern')} · ${desc('hand_lantern')} (L)`;
+    lb.innerHTML = `${icon('hand_lantern')}`;
+    lb.addEventListener('pointerdown', (e) => { stop(e); e.preventDefault(); this.wake(); onLantern?.(); });
+    this.hotbar.appendChild(lb); this.lanternBtn = lb;
     for (const k of HOTBAR) {
       const b = document.createElement('button');
       b.className = 'slot'; b.dataset.kind = k; b.title = `${label(k)} · ${desc(k)}`;
       b.innerHTML = `${icon(k)}<span class="n">0</span>`;
       // Chunk C: tapping the stew slot again once it's selected eats a bowl (pointerdown, never click — iOS)
       b.addEventListener('pointerdown', (e) => {
-        stop(e); e.preventDefault();
+        stop(e); e.preventDefault(); this.wake();
         const again = this.selected === k; this.select(k);
         if (again && k === 'stew') this.onEat?.(); else this.showTip(k, b);
       });
@@ -50,13 +59,15 @@ export class InventoryUI {
     // Biscuit's stick: a free hotbar action (not the wood item) — tap to throw
     const stick = document.createElement('button');
     stick.className = 'slot action'; stick.id = 'btn-stick'; stick.title = 'Throw a stick for Biscuit (G)';
-    stick.innerHTML = `${iconHtml('stick')}<span class="c">fetch</span>`;
-    stick.addEventListener('pointerdown', (e) => { stop(e); e.preventDefault(); onStick?.(); });
+    stick.innerHTML = `${iconHtml('stick')}<span class="cd"></span>`;
+    stick.addEventListener('pointerdown', (e) => { stop(e); e.preventDefault(); this.wake(); onStick?.(); });
     this.hotbar.appendChild(stick); this.stickBtn = stick;
-    const bagBtn = document.createElement('button');
-    bagBtn.className = 'slot bag'; bagBtn.id = 'btn-bag'; bagBtn.title = 'Pack'; bagBtn.textContent = '🎒';
+    // the pack button lives in the top-right column now (index.html #hud-col)
+    const bagBtn = $('btn-bag');
+    bagBtn.title = 'Pack (I)'; bagBtn.innerHTML = iconHtml('ui_inventory');
     bagBtn.addEventListener('pointerdown', (e) => { stop(e); e.preventDefault(); this.toggleBag(); });
-    this.hotbar.appendChild(bagBtn);
+    this._wakeT = 0; this.wake();
+    this._idleIv = setInterval(() => this.hotbar.classList.toggle('idle', performance.now() - this._wakeT > IDLE_MS), 500);
     this.select('wood');
     // palette
     this.pieceBtns = {};
@@ -95,16 +106,33 @@ export class InventoryUI {
     for (const [k, b] of Object.entries(this.slots)) b.classList.toggle('sel', k === kind);
     this.onSelect?.(kind);
   }
-  setStickOut(out) { this.stickBtn.classList.toggle('cant', !!out); }
+  setStickOut(out) {
+    // cooldown: the hatched overlay, masked by a conic sweep (--cd 1 → 0) while Biscuit has the stick
+    if (out && !this._stickT) this._stickT = performance.now();
+    if (!out) this._stickT = 0;
+    const cd = out ? Math.max(0.12, 1 - (performance.now() - this._stickT) / 9000) : 0;
+    if (this._cd !== cd.toFixed(2)) { this._cd = cd.toFixed(2); this.stickBtn.style.setProperty('--cd', this._cd); }
+    this.stickBtn.classList.toggle('cant', !!out);
+  }
+  /** Lit / stowed / lost (lost = ghost ring; tapping makes a new one). */
+  setLantern(lit, has) {
+    const key = `${lit}|${has}`; if (this._lk === key) return; this._lk = key;
+    this.lanternBtn.classList.toggle('on', !!lit && !!has);
+    this.lanternBtn.classList.toggle('empty', !has);
+    if (this._lkInit) this.wake(); this._lkInit = true;
+  }
+  /** Any touch on the bar or a change in the pack brings it back to full opacity. */
+  wake() { this._wakeT = performance.now(); this.hotbar.classList.remove('idle'); }
 
   setInventory(inv) {
     for (const k of HOTBAR) {
       const n = inv[k] || 0;
       if (this._last[k] === n) continue;
       const b = this.slots[k];
-      b.querySelector('.n').textContent = n;
+      b.querySelector('.n').textContent = n > 99 ? '99+' : n;
       b.classList.toggle('empty', n === 0);
-      if (k === 'stew') b.classList.toggle('hidden', n === 0);
+      if (!ALWAYS.has(k)) b.classList.toggle('hidden', n === 0);
+      if (this._last[k] !== undefined) this.wake();
       if (this._last[k] !== undefined && n > this._last[k]) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
       this._last[k] = n;
     }

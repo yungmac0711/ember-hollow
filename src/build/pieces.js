@@ -11,6 +11,7 @@
 // Chunk B unlocks: `locked` pieces appear once a Wren request rewards them (build_piece); `decor` and
 // `keepsake` pieces cost one of themselves (inventory count) so placing/removing moves them in and
 // out of the pack. Flavor lines come from story/data/item_flavor.json + biscuit_finds.json.
+import { spriteHtml } from '../ui/icons.js';
 import { STORY } from '../data/story.js';
 
 const F = STORY.itemFlavor;
@@ -47,8 +48,10 @@ export function costText(cost) {
   return Object.entries(cost).map(([k, n]) => (PIECES[k] ? `${n} ${PIECES[k].name.toLowerCase()}` : `${n} ${RES_LABEL[k] || k}`)).join(' + ');
 }
 
-/** <img> or emoji markup for an icon id. */
+/** Atlas sprite (M2: icons/atlas.png, aliases resolved), legacy <img>, or emoji markup for an icon id. */
 export function iconHtml(icon, cls = '') {
+  const sp = spriteHtml(icon, cls);
+  if (sp) return sp;
   if (/^[a-z0-9_-]+$/i.test(icon)) return `<img class="ico-img ${cls}" src="assets/icons/${icon}.png" alt="" draggable="false">`;
   return `<span class="ico ${cls}">${icon}</span>`;
 }

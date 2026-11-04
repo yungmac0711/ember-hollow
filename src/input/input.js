@@ -59,6 +59,8 @@ export class Input {
       if (e.code === 'Digit0') this.pressed.add('slot10');
       if (e.code === 'KeyT' || e.code === 'Enter') { this.pressed.add('chat'); e.preventDefault(); }
       if (e.code === 'KeyG') this.pressed.add('stick');
+      if (e.code === 'KeyL') this.pressed.add('lantern'); // M2: Cam's hand lantern
+      if (e.code === 'KeyH') this.pressed.add('hidehud');
       if (e.code === 'Escape' || e.code === 'KeyP') this.pressed.add('pause');
     });
     window.addEventListener('keyup', (e) => {

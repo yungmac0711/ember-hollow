@@ -1,16 +1,20 @@
 // Cam, seen only while seated (first-person game): Art's cam-sit.glb (hood up) / cam-sit-hood-down.glb,
 // loaded directly in the seated pose (origin at the feet, hips at 0.47, seat ≈ 0.45 m). Same node names
-// as Wren under a root called `Cam`. `lantern` is an unlit belt pouch: no light is attached. The hood
+// as Wren under a root called `Cam`. `lantern` is an unlit belt pouch; M2: the hand lantern hangs from
+// elbow_R (its light is the HandLantern emitter, never a real light on this model). The hood
 // follows Wren's hood (same fog/fire rule, same spot). Each variant is lifted + skinned into one mesh;
 // only the active one draws, and nothing draws while Cam is standing. Look is PROVISIONAL (Art + Cameron).
 import * as THREE from 'three';
 import { liftCharacter, skinCharacter } from '../render/character-materials.js';
+import { CONFIG } from '../config.js';
+import { plumb } from './hand-lantern.js';
 
 const SEAT_H = 0.45;
+const _rq = new THREE.Quaternion();
 
 export class CamSeated {
   /** @param up  loadScene('camSit') result (hood up); @param down  loadScene('camSitHoodDown') */
-  constructor(scene, up, down) {
+  constructor(scene, up, down, makeLantern = null) {
     this.root = new THREE.Group(); this.root.name = 'cam-seated'; this.root.visible = false;
     this.variants = {};
     for (const [k, s] of [['up', up], ['down', down]]) {
@@ -19,7 +23,16 @@ export class CamSeated {
       this.root.add(m);
       liftCharacter(m); skinCharacter(m);
       m.visible = false;
-      this.variants[k] = { root: m, torso: m.getObjectByName('torso'), head: m.getObjectByName('head') };
+      // M2 chunk A: the hand lantern hangs from elbow_R at (0, −0.32, 0.02), rotation 0, added after
+      // skinning so it stays its own small mesh; `swing` is kept plumb in update().
+      const elbow = m.getObjectByName('elbow_R') || m.getObjectByName('arm_R');
+      let lamp = null;
+      if (elbow && makeLantern) {
+        lamp = new THREE.Group(); lamp.name = 'hand_lantern';
+        lamp.position.fromArray(elbow.name === 'elbow_R' ? CONFIG.handLantern.elbow : [0, -0.62, 0.02]);
+        const swing = makeLantern(); lamp.add(swing); elbow.add(lamp); lamp.userData.swing = swing;
+      }
+      this.variants[k] = { root: m, torso: m.getObjectByName('torso'), head: m.getObjectByName('head'), lamp };
     }
     this.ok = !!(this.variants.up || this.variants.down);
     if (this.ok) scene.add(this.root);
@@ -35,7 +48,8 @@ export class CamSeated {
   }
 
   /** seat: { pos (seat top), yaw (camera yaw facing out) } or null; hoodUp mirrors Wren's hood */
-  update(dt, seat, hoodUp) {
+  update(dt, seat, hoodUp, lanternLit = false, sway = null) {
+    this.lamp = null;
     if (!this.ok) return;
     if (!seat) { if (this.root.visible) this.root.visible = false; return; }
     this.root.visible = true;
@@ -46,5 +60,14 @@ export class CamSeated {
     this.t += dt; const v = this.active;
     if (v?.torso) v.torso.rotation.x = Math.sin(this.t * 1.6) * 0.012;
     if (v?.head) v.head.rotation.y = Math.sin(this.t * 0.23) * 0.12;
+    if (v?.lamp) {
+      v.lamp.visible = !!lanternLit;
+      if (lanternLit) {
+        const sw = v.lamp.userData.swing;
+        v.root.updateWorldMatrix(true, true);
+        plumb(sw, v.root.getWorldQuaternion(_rq), Math.sin(this.t * 0.9) * 0.03, Math.sin(this.t * 0.7) * 0.025);
+        this.lamp = { swing: sw };
+      }
+    }
   }
 }

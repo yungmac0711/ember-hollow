@@ -107,10 +107,27 @@ export const CONFIG = {
     // §8.3 (approved Nov 4): on the surface at night the lantern is 4.5 / 9 outside a fire's radius and
     // stays on at the §8.1 3.5 / 7 inside it (in the cave and by day it is still off inside the fire radius)
     lanternNight: { intensity: 4.5, distance: 9, inFire: 3.5, inFireDistance: 7 },
+    // M2 follow ring (Cameron: never in / clipping the view): hold 2.5–3.5 m beside-and-behind Cam,
+    // back off when he walks at her, step out of view if closer than viewMin, hard floor `clip` from the eye
+    follow: { min: 2.5, max: 3.5, ideal: 3.0, side: 1.9, back: 2.3, viewMin: 2.4, clip: 1.2 },
     hood: { upWhenFog: 'thick', downNearFireSeconds: 4, minToggleSeconds: 10 }, // see wren.js _updateHood
     barkCooldown: 25, // seconds between unprompted remarks
     summarizeEvery: 30, // messages between memory summary passes
     historyTurns: 8,
+  },
+  // M2 chunk A: Cam's hand lantern (art/assets/craft/CRAFT_ASSETS.md "Held lanterns"). An emitter in the
+  // LightBudget, priority 2.5: fire (3) > Cam's lantern > Wren's lantern (2) > torches (1) > crystals.
+  // While it is lit, Wren's light merges into it (her emitter fades out), so lanterns use ONE slot.
+  handLantern: {
+    color: 0xffb347, intensity: 3.5, distance: 8, decay: 2, priority: 2.5,
+    night: { intensity: 4.5, distance: 9 }, // surface at night, away from a fire (same rule as Wren's)
+    elbow: [0, -0.32, 0.02], // seated Cam: root parented to elbow_R here, rotation 0
+    fp: { pos: [0.36, -0.2, -0.55], scale: 0.5 }, // first-person prop (camera space)
+    light: [0.2, -0.6, -2.6], floorLift: 0.7, // emitter: right / up / forward of the eye in Cam's yaw frame (lights the path, not the sky), held 0.7 m over the floor
+    // path gain over the 3.5 / 8 (4.5 / 9) spec: at exactly 3.5 cd the pool on the dark cave floor barely
+    // reads (measured, m2a screenshots); 1.8 makes the dark clearly better. Set 1 for the literal spec.
+    gain: 1.8,
+    recipe: { wood: 2, stone: 1, glowcap: 1 }, // placeholder until the bench (tap the empty slot to make one)
   },
   puppy: { name: 'Biscuit' },
   // LLM provider for companion chat. 'bank' = Wren's offline reply bank from story/wren_replies.json (default, no network);
@@ -140,6 +157,7 @@ export const CONFIG = {
       companionHood: 'assets/models/characters/wren/wren-hood-up.glb',
       camSit: 'assets/models/characters/cam/cam-sit.glb', // Cam is only seen seated (hood up / down)
       camSitHoodDown: 'assets/models/characters/cam/cam-sit-hood-down.glb',
+      handLantern: 'assets/models/craft/hand_lantern.glb', // M2: Cam's starting lantern (held)
       campfire: 'assets/models/campfire/campfire-pit.glb',
       stick: 'assets/models/props/resource-wood.glb',
       stone: 'assets/models/props/resource-stone.glb',

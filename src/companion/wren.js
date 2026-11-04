@@ -92,6 +92,17 @@ export class Wren {
     this._hoodT = 999;
     this.hoodUp = false;
     this._hoodInit = false;
+    this._right = new THREE.Vector3(); this._yield = new THREE.Vector3(); this._side = 1; this.inView = false;
+    this._frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._chest = new THREE.Vector3();
+  }
+
+  /** Is her body (chest point) inside the camera's view frustum? */
+  _inFrustum(camera) {
+    if (!camera) return false;
+    camera.updateMatrixWorld();
+    this._pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(this._pm);
+    return this._frustum.containsPoint(this._chest.set(this.pos.x, this.pos.y + 1.1, this.pos.z));
   }
 
   /** Hood logic (judgement call, documented in README): the hood goes UP when the Long Dark is
@@ -116,12 +127,23 @@ export class Wren {
     const inFire = fire && Math.hypot(pp.x - fire.pos.x, pp.z - fire.pos.z) < fire.lightRadius;
     const selfInFire = fire && Math.hypot(this.pos.x - fire.pos.x, this.pos.z - fire.pos.z) < fire.lightRadius;
     let moveSpeed = 0, face = pp;
+    // M2 follow geometry: Cam's frame, where she is relative to him and to the camera's view
+    const F = CONFIG.companion.follow;
+    const fwd = player.forward, right = this._right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+    const dx = this.pos.x - pp.x, dz = this.pos.z - pp.z, dp = Math.hypot(dx, dz) || 1e-3;
+    const sideNow = dx * right.x + dz * right.z;
+    if (Math.abs(sideNow) > 0.6 || !this._side) this._side = sideNow >= 0 ? 1 : -1;
+    const sp = player.speed || 0;
+    const towardK = sp > 0.6 ? (player.vel.x * dx + player.vel.z * dz) / (dp * sp) : 0; // Cam walking at her
+    const inView = !player.seat && this._inFrustum(env.camera);
+    const crowd = !this.seat && !talking && (dp < F.min - 0.6 || (towardK > 0.55 && dp < F.max + 0.5) || (inView && dp < F.viewMin && this.state !== 'fire'));
+    this.inView = inView;
     // Chunk B: she helps gather — now and then she picks up something next to her and hands it to Cam
     this.gatherT = (this.gatherT ?? 20 + Math.random() * 15) - dt;
     if (!this.gathering && this.gatherT <= 0 && !talking && env.items) {
       this.gatherT = 20 + Math.random() * 20;
       const it = env.items.nearest(this.pos, 3, pp, 6);
-      if (it) { this.gathering = it; this._gatherTime = 0; }
+      if (it && Math.hypot(it.pos.x - pp.x, it.pos.z - pp.z) > 2.2) { this.gathering = it; this._gatherTime = 0; } // M2: not right under Cam's nose
     }
     if (this.seat) {
       // Chunk D: sit beside Cam at the Glowmere (rock or lakeside bench)
@@ -145,23 +167,37 @@ export class Wren {
       if (d > 0.3 && this.state !== 'fire') { moveSpeed = Math.min(3, 0.8 + d); face = this.target; this.state = 'toFire'; }
       else if (d > 1.2) { this.state = 'toFire'; moveSpeed = 1.5; face = this.target; }
       else { face = fire.pos; this.state = 'fire'; }
+    } else if (crowd) {
+      // M2: Cam is walking at her or is too close: back off to the follow ring, stepping out of his
+      // path and out of the middle of the view (she never stands in or clips the camera)
+      this.gathering = null;
+      this._yield.set(dx, 0, dz).normalize();
+      if (towardK > 0.55) { // sideways out of his line of travel
+        const px = -player.vel.z / sp, pz = player.vel.x / sp, sg = px * dx + pz * dz >= 0 ? 1 : -1;
+        this._yield.x += px * sg * 0.9; this._yield.z += pz * sg * 0.9;
+      }
+      if (inView) { this._yield.x += right.x * this._side * 0.8 - fwd.x * 0.3; this._yield.z += right.z * this._side * 0.8 - fwd.z * 0.3; }
+      this._yield.normalize();
+      this.target.set(pp.x + this._yield.x * F.ideal, 0, pp.z + this._yield.z * F.ideal);
+      this.cave.resolve(this.target, 0.6); this.colliders?.resolve(this.target, 0.35);
+      moveSpeed = Math.min(5.5, Math.max(2.4, sp + 1.2)); face = this.target; this.state = 'yield';
     } else {
-      // walk alongside Cam, slightly behind and to the right
-      const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
-      this.target.copy(pp).addScaledVector(right, 1.6).addScaledVector(player.forward, -1.2);
+      // M2 follow ring: 2.5–3.5 m from Cam, beside and behind (keeps whichever side she is on)
+      this.target.copy(pp).addScaledVector(right, F.side * this._side).addScaledVector(fwd, -F.back);
       this.cave.resolve(this.target, 0.6);
       const d = Math.hypot(this.target.x - this.pos.x, this.target.z - this.pos.z);
-      const dp = Math.hypot(pp.x - this.pos.x, pp.z - this.pos.z);
       if (dp > 25) { this.colliders?.resolve(this.target, 0.35); this.pos.copy(this.target); }
-      if (d > 0.8 && !talking) { moveSpeed = Math.min(5, 1 + d * 1.3); face = d > 1.5 ? this.target : pp; this.state = 'follow'; }
+      const settled = sp < 0.4 && dp >= F.min + 0.25 && dp <= F.max; // stop inside the ring, not on its edge
+      if (!talking && !settled && d > 0.6) { moveSpeed = Math.min(5.5, sp * 0.9 + 0.6 + d * 1.2); face = this.target; this.state = 'follow'; } // walk where she's going (facing Cam while moving walked her into him)
       else this.state = 'idle';
     }
     let want = Math.atan2(face.x - this.pos.x, face.z - this.pos.z);
     if (moveSpeed > 0.3) want = steer(this.colliders, this.pos, want, 0.35, this._steer || (this._steer = {}));
     let dh = want - this.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    const turn = dh * Math.min(1, dt * 6);
+    const quick = this.state === 'yield' ? 2.2 : 1; // stepping out of Cam's way reacts faster
+    const turn = dh * Math.min(1, dt * 6 * quick);
     this.heading += turn;
-    this.speed += (moveSpeed - this.speed) * Math.min(1, dt * 5);
+    this.speed += (moveSpeed - this.speed) * Math.min(1, dt * 5 * quick);
     if (this.speed > 0.02) {
       this.pos.x += Math.sin(this.heading) * this.speed * dt;
       this.pos.z += Math.cos(this.heading) * this.speed * dt;
@@ -176,6 +212,16 @@ export class Wren {
         this._stuckT = 0; this.gathering = null;
         const back = player.forward.clone().multiplyScalar(-1.4).add(pp);
         this.cave.resolve(back, 0.6); this.colliders?.resolve(back, 0.35); this.pos.copy(back);
+      }
+    }
+    // M2: never clip the first-person camera: hard minimum distance from the eye (horizontal)
+    if (!player.seat && !this.seat && env.camera) {
+      const c = env.camera.position, cx = this.pos.x - c.x, cz = this.pos.z - c.z, cd = Math.hypot(cx, cz);
+      if (cd < F.clip) {
+        const ux = cd > 1e-3 ? cx / cd : -fwd.x, uz = cd > 1e-3 ? cz / cd : -fwd.z;
+        this.pos.x = c.x + ux * F.clip; this.pos.z = c.z + uz * F.clip;
+        this.cave.resolve(this.pos, 0.6); this.colliders?.resolve(this.pos, 0.35);
+        this.pushed = (this.pushed || 0) + 1;
       }
     }
     this.pos.y = Math.max(this.cave.floorAt(this.pos.x, this.pos.z), this.floorAt ? this.floorAt(this.pos.x, this.pos.z) : -Infinity);
@@ -210,7 +256,9 @@ export class Wren {
     this.emitter.distance += (wantD - this.emitter.distance) * Math.min(1, dt * 2);
     this.lampNode.updateWorldMatrix(true, false);
     this.emitter.pos.copy(this._lampOffset).applyMatrix4(this.lampNode.matrixWorld);
-    this.emitter.intensity = L.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
+    // M2: while Cam's hand lantern is lit her light merges into it (lanterns share one slot)
+    this.merged = THREE.MathUtils.clamp(env.camLantern || 0, 0, 1);
+    this.emitter.intensity = L.intensity * this.lightOn * (1 - this.merged) * (0.95 + Math.sin(performance.now() / 90) * 0.05);
 
     this.status = this.state === 'seat' ? 'sitting beside Cam by the water' : this.state === 'fire' ? 'sitting by the fire, warming her hands' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
     if (this.hoodUp) this.status += ', hood up against the cold';

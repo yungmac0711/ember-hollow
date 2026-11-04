@@ -6,7 +6,7 @@
 import { SETTINGS_KEY, TIER, tierLow } from '../config.js';
 import { onTap } from './tap.js';
 
-export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto', showFps: false };
+export const DEFAULTS = { master: 0.8, music: 1, effects: 1, sens: 1, invertY: false, tier: 'auto', showFps: false, hudScale: 'medium', hideHud: false };
 
 export function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
@@ -50,6 +50,16 @@ export class SettingsPanel {
     };
     showTier();
     onTap(seg, (b) => { this.s.tier = b.dataset.tier; showTier(); this._changed(); }, (t) => t.closest?.('[data-tier]'));
+    // M2 chunk A: HUD size + hide HUD (live)
+    const hs = $('set-hud');
+    const showHud = () => { for (const b of hs.children) b.classList.toggle('on', b.dataset.hud === this.s.hudScale); };
+    showHud();
+    onTap(hs, (b) => { this.s.hudScale = b.dataset.hud; showHud(); this._changed(); }, (t) => t.closest?.('[data-hud]'));
+    const hh = $('set-hidehud');
+    const showHide = () => { hh.setAttribute('aria-pressed', String(!!this.s.hideHud)); hh.textContent = this.s.hideHud ? 'On' : 'Off'; };
+    showHide();
+    onTap(hh, () => { this.s.hideHud = !this.s.hideHud; showHide(); this._changed(); });
+    this.setHideHud = (on) => { this.s.hideHud = !!on; showHide(); this._changed(); };
     onTap(this.reloadBtn, () => { this.save(); beforeReload?.(); location.reload(); });
     onTap($('settings-close'), () => this.close());
     this.apply(this.s);

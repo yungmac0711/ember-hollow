@@ -8,6 +8,7 @@ import * as THREE from 'three';
 
 const PIVOTS = ['hips', 'leg_L', 'leg_R', 'torso', 'cloak', 'head', 'arm_L', 'arm_R'];
 const smooth = (a, b, k) => a + (b - a) * k;
+const _pq = new THREE.Quaternion(), _rq = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _se = new THREE.Euler();
 
 export class WrenAnimator {
   constructor(root, hoodUpNode) {
@@ -34,6 +35,10 @@ export class WrenAnimator {
       this.swing.position.copy(this.n.arm_R.worldToLocal(top.clone()));
       this.swing.updateMatrixWorld(true);
       this.swing.attach(this.lantern);
+      // M2 (Art): with the knee/elbow joints the hand is under elbow_R; hang the swing from it
+      // (attach keeps the world pose) and keep it plumb in update().
+      const elbow = root.getObjectByName('elbow_R');
+      if (elbow) { root.updateMatrixWorld(true); elbow.attach(this.swing); }
     }
     this.t = Math.random() * 10;
     this.ph = 0;
@@ -111,7 +116,10 @@ export class WrenAnimator {
       this.lvx += (-K * this.lx - C * this.lvx + fx) * dt; this.lx += this.lvx * dt;
       this.lvz += (-K * this.lz - C * this.lvz + fz) * dt; this.lz += this.lvz * dt;
       this.lx = THREE.MathUtils.clamp(this.lx, -0.7, 0.7); this.lz = THREE.MathUtils.clamp(this.lz, -0.6, 0.6);
-      this.swing.rotation.set(-n.arm_R.rotation.x - n.torso.rotation.x + this.lx, 0, -n.arm_R.rotation.z + this.lz);
+      // hang plumb whatever the arm/elbow/torso do: swing.quaternion = inverse(parent world quat) ×
+      // root world quat, then the spring sway on top (M2: replaces the old per-joint counter-rotation)
+      this.swing.parent.getWorldQuaternion(_pq).invert();
+      this.swing.quaternion.copy(_pq.multiply(this.root.getWorldQuaternion(_rq))).multiply(_sq.setFromEuler(_se.set(this.lx, 0, this.lz)));
     }
   }
 }

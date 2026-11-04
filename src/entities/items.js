@@ -24,6 +24,9 @@ export const ITEM_INFO = {
   glowcap: { label: 'glowcap', icon: '🍄', img: 'glowcap', pickup: true },
   crystal_shard: { label: 'crystal shard', icon: '💎', img: 'crystal', pickup: true },
   stew: { label: 'stew', icon: '🍲', img: 'stew-bowl' },
+  // M2 chunk A: Cam's starting lantern (story/DATA_FORMATS.md: `hand_lantern`, small and plain, about
+  // as bright as Wren's light; the Ch5 `waylamp` replaces it). Tap its hotbar slot to light / stow it.
+  hand_lantern: { label: 'hand lantern', icon: '🏮', img: 'hand_lantern', tool: true, desc: 'A small, plain lantern. Plenty of light to find your way.' },
 };
 for (const [k, line] of Object.entries(STORY.itemFlavor.items)) if (ITEM_INFO[k]) ITEM_INFO[k].desc = line;
 export const PICKUP_KINDS = Object.keys(ITEM_INFO).filter((k) => ITEM_INFO[k].pickup);
