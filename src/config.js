@@ -47,6 +47,8 @@ export const CONFIG = {
     characterLift: { emissive: 0x16202c, emissiveIntensity: 1.0, rim: { color: 0x7fa3c8, power: 2.5, strength: 0.35 } },
   },
   player: {
+    // polish: seated camera — behind/above the middle of Cam (stand-in) and Wren, aimed out over the water
+    seatCam: { back: 2.5, side: 0.6, up: 1.85, ahead: 2.4, lookY: 0.1 },
     radius: 0.35,
     eyeHeight: 1.55,
     walkSpeed: 4.0,
@@ -83,11 +85,21 @@ export const CONFIG = {
     cold: 25, warm: 70, stew: 45, stewHold: 120 },
   cooking: { ingredients: 2, seconds: 15 },
   weather: { rainOpacity: 0.35 },
+  // STYLE_GUIDE §8.3 night + rain floor (approved Nov 4, 2026): surface at night, applied fully beyond
+  // fire radius + 6 m (the §8.1 smoothstep k); clear ↔ rain eases over 4 s. Moon is #9FB4D9.
+  nightFloor: {
+    clear: { hemi: 0.70, sky: 0x2a3a5c, ground: 0x1a2230, moon: 0.40, fog: 0x2e3a52 },
+    rain:  { hemi: 0.80, sky: 0x33466b, ground: 0x1e2838, moon: 0.45, fog: 0x34405a },
+    easeSec: 4,
+  },
   build: { grid: 2, wallHeight: 2.1, reach: 2.2 }, // piece costs live in src/build/pieces.js
   playerName: 'Cam',
   companion: {
     name: 'Wren', // persona + lines come from /story via src/companion/story-data.js (npm run sync-story)
     lantern: { color: 0xe08a2e, intensity: 3.5, distance: 7 }, // §8.1: #E08A2E, 3.5, 7, decay 2; off inside the fire radius (key light while exploring)
+    // §8.3 (approved Nov 4): on the surface at night the lantern is 4.5 / 9 outside a fire's radius and
+    // stays on at the §8.1 3.5 / 7 inside it (in the cave and by day it is still off inside the fire radius)
+    lanternNight: { intensity: 4.5, distance: 9, inFire: 3.5, inFireDistance: 7 },
     hood: { upWhenFog: 'thick', downNearFireSeconds: 4, minToggleSeconds: 10 }, // see wren.js _updateHood
     barkCooldown: 25, // seconds between unprompted remarks
     summarizeEvery: 30, // messages between memory summary passes

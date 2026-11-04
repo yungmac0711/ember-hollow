@@ -200,11 +200,17 @@ export class Wren {
     }
 
     // Waylamp emitter: off inside the campfire's light (light budget) — fade, don't pop.
-    const want2 = inFire ? 0 : 1;
+    // §8.3: on the surface at night (env.nightSurface 0..1) it is 4.5 / 9 outside a fire's radius and
+    // stays on at 3.5 / 7 inside it.
+    const L = CONFIG.companion.lantern, LN = CONFIG.companion.lanternNight, ns = env.nightSurface || 0;
+    const wantI = inFire ? LN.inFire * ns : THREE.MathUtils.lerp(L.intensity, LN.intensity, ns);
+    const wantD = inFire ? THREE.MathUtils.lerp(L.distance, LN.inFireDistance, ns) : THREE.MathUtils.lerp(L.distance, LN.distance, ns);
+    const want2 = wantI / L.intensity;
     this.lightOn += (want2 - this.lightOn) * Math.min(1, dt * 2);
+    this.emitter.distance += (wantD - this.emitter.distance) * Math.min(1, dt * 2);
     this.lampNode.updateWorldMatrix(true, false);
     this.emitter.pos.copy(this._lampOffset).applyMatrix4(this.lampNode.matrixWorld);
-    this.emitter.intensity = CONFIG.companion.lantern.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
+    this.emitter.intensity = L.intensity * this.lightOn * (0.95 + Math.sin(performance.now() / 90) * 0.05);
 
     this.status = this.state === 'seat' ? 'sitting beside Cam by the water' : this.state === 'fire' ? 'sitting by the fire, warming her hands' : this.state === 'toFire' ? 'heading to the fire' : 'beside Cam';
     if (this.hoodUp) this.status += ', hood up against the cold';

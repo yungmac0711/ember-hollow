@@ -21,7 +21,11 @@ const PH = {
   dusk:  { sky: C(0xC77A6A), ground: C(0x2E2838), hemi: 0.55, dir: C(0xFF8A4A), dirI: 1.0,  elev: 8,  az: 180, fog: C(0x8A6A78), dens: 0.022 },
   night: { sky: C(0x2A3A5C), ground: C(0x0B0E14), hemi: 0.55, dir: C(0x9FB4D9), dirI: 0.35, elev: 40, az: 120, fog: C(0x1E2636), dens: 0.030 },
 };
-const NIGHT_DROP = { hemi: 0.7, sky: C(0x33466B) }; // drop-the-moon compensation
+const NIGHT_DROP = { hemi: 0.7, sky: C(0x33466B) }; // drop-the-moon compensation (§8.2; the §8.3 floor is ≥ this)
+// §8.3 night floor (CONFIG.nightFloor): replaces the night row's hemi/sky/ground/moon/fog away from fires
+const NF = CONFIG.nightFloor;
+const NFC = { clear: { sky: C(NF.clear.sky), ground: C(NF.clear.ground), fog: C(NF.clear.fog) }, rain: { sky: C(NF.rain.sky), ground: C(NF.rain.ground), fog: C(NF.rain.fog) } };
+const NEAR_FIRE_GROUND = C(0x0B0E14); // §8.1 ground at the fire
 // Sky dome stops: dusk / night / rain_night from sky_rain.json; day + dawn derived from the §8.2 row.
 const SKY = {
   day:   { zenith: C(0x5D8CC4), horizon: C(0xA9C2D6), ground: C(0x4A5A3A), glow: C(0xFFF1D6), glowAmt: 0.12, stars: 0 },
@@ -105,7 +109,7 @@ export class DayNight {
   constructor(scene, cave, budget, { low = false } = {}) {
     this.cave = cave; this.budget = budget; this.low = low;
     this.tod = 120;             // seconds into the cycle (new game: early day)
-    this.weather = 'clear'; this.rainK = 0;
+    this.weather = 'clear'; this.rainK = 0; this.rainL = 0; // rainL: the §8.3 4 s light ease
     this._wT = 200 + Math.random() * 160; // first spell of weather no sooner than ~3 min in
     this.forceRain = new URLSearchParams(location.search).get('rain') === '1';
     this.b = 0; this.nightness = 0; this.starAlpha = 0;
@@ -164,6 +168,7 @@ export class DayNight {
     }
     const target = this.weather === 'rain' ? 1 : 0;
     this.rainK += Math.sign(target - this.rainK) * Math.min(Math.abs(target - this.rainK), dt / 25); // ~25 s tween
+    this.rainL += Math.sign(target - this.rainL) * Math.min(Math.abs(target - this.rainL), dt / NF.easeSec); // §8.3: 4 s
   }
 
   /**
@@ -184,16 +189,24 @@ export class DayNight {
     const drop = this.budget.moonDropped * nightW;
 
     // ---- surface hemisphere + fog
-    c.sky.lerpColors(A.sky, B.sky, k).lerp(NIGHT_DROP.sky, drop);
-    c.ground.lerpColors(A.ground, B.ground, k);
-    let hI = THREE.MathUtils.lerp(A.hemi, B.hemi, k);
-    hI = THREE.MathUtils.lerp(hI, NIGHT_DROP.hemi, drop);
+    // §8.3: the night keyframe is the night floor (clear ↔ rain by rainL), so dusk/dawn fade into it
+    const rl = this.rainL, fl = this._fl || (this._fl = { sky: new THREE.Color(), ground: new THREE.Color(), fog: new THREE.Color() });
+    fl.sky.lerpColors(NFC.clear.sky, NFC.rain.sky, rl); fl.ground.lerpColors(NFC.clear.ground, NFC.rain.ground, rl); fl.fog.lerpColors(NFC.clear.fog, NFC.rain.fog, rl);
+    const flHemi = THREE.MathUtils.lerp(NF.clear.hemi, NF.rain.hemi, rl);
+    this.moonI = THREE.MathUtils.lerp(NF.clear.moon, NF.rain.moon, rl);
+    const pick = (P, f) => (P === PH.night ? fl[f] : P[f]);
+    c.sky.lerpColors(pick(A, 'sky'), pick(B, 'sky'), k);
+    c.ground.lerpColors(pick(A, 'ground'), pick(B, 'ground'), k);
+    c.ground.lerp(NEAR_FIRE_GROUND, (1 - fireK) * nightW);                         // §8.1 ground at the fire
+    let hI = THREE.MathUtils.lerp(A === PH.night ? flHemi : A.hemi, B === PH.night ? flHemi : B.hemi, k);
+    hI = Math.max(hI, NIGHT_DROP.hemi * drop);
     hI = THREE.MathUtils.lerp(hI, THREE.MathUtils.lerp(0.45, hI, fireK), nightW); // §8.1 campfire rule at night
     hI *= 1 - 0.2 * rk * dayW;                                                       // rain: day hemi ×0.8
-    c.fog.lerpColors(A.fog, B.fog, k);
+    c.fog.lerpColors(pick(A, 'fog'), pick(B, 'fog'), k);
     let dens = THREE.MathUtils.lerp(A.dens, B.dens, k) * (1 + 0.6 * rk);           // rain: fog ×1.6
-    const grey = this._c.gl.copy(RAIN_GREY).lerp(RAIN_NIGHT.fog, nightW);
-    c.sky.lerp(grey, 0.45 * rk); c.fog.lerp(grey, 0.6 * rk);
+    // rain grey by day; at night §8.3 already sets the rain colours
+    const grey = this._c.gl.copy(RAIN_GREY);
+    c.sky.lerp(grey, 0.45 * rk * (1 - nightW)); c.fog.lerp(grey, 0.6 * rk * (1 - nightW));
     this.surf.hemi = hI; this.surf.dens = dens;
 
     // ---- blend over the cave (§8.1 values already applied by AmbientController + main)
@@ -211,12 +224,12 @@ export class DayNight {
     let dirI, dir = this._d;
     if (moon) {
       const mk = t < T.duskEnd ? k : t >= T.nightEnd ? 1 - k : 1;
-      dirI = PH.night.dirI * mk; c.dir.copy(PH.night.dir); dirFrom(PH.night.elev, PH.night.az, dir);
+      dirI = this.moonI * mk; c.dir.copy(PH.night.dir); dirFrom(PH.night.elev, PH.night.az, dir); // §8.3 moon 0.40 / 0.45
     } else {
       dirI = THREE.MathUtils.lerp(A.dirI, B.dirI, k); c.dir.lerpColors(A.dir, B.dir, k);
       dirFrom(A.elev, A.az, dir).lerp(dirFrom(B.elev, B.az, this._d2), k).normalize();
     }
-    dirI *= swap * (1 - 0.5 * rk);
+    dirI *= swap * (moon ? 1 : 1 - 0.5 * rk); // the §8.3 rain moon already has its own value
     this.budget.isMoon = moon;
     this.budget.sunTarget = dirI * b;
     const sun = this.budget.sun;
@@ -257,7 +270,7 @@ export class DayNight {
     if (!d) return;
     if (Number.isFinite(d.tod)) this.tod = ((d.tod % CYCLE) + CYCLE) % CYCLE;
     if (d.weather === 'rain' || d.weather === 'clear') this.weather = d.weather;
-    if (Number.isFinite(d.rainK)) this.rainK = d.rainK;
+    if (Number.isFinite(d.rainK)) this.rainK = this.rainL = d.rainK;
     if (Number.isFinite(d.wT)) this._wT = d.wT;
   }
 }
