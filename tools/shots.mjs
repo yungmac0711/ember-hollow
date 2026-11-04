@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// M1 screenshots: 4 landscape shots at 1688x780 (iPhone landscape 844x390 @2x) into screenshots/m1-*.png.
+// M1 screenshots: 5 landscape shots at 1688x780 (iPhone landscape 844x390 @2x) into screenshots/m1-*.png.
 // Needs the game served at BASE (default http://localhost:8931/) and playwright.
 import { chromium } from 'playwright';
 const BASE = process.env.BASE || 'http://localhost:8931/';
@@ -39,7 +39,7 @@ await page.evaluate(() => {
 // 1. a built cabin in the clearing, hearth lit, Wren and Biscuit inside (evening)
 const cabin = await page.evaluate(() => {
   const g = __game, h = __h, cl = g.cave.clearing, G = 2, out = [];
-  g.dayNight.forceRain = false; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0; g.dayNight.tod = 830;
+  g.dayNight.forceRain = false; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0; g.dayNight.rainL = 0; g.dayNight.tod = 830;
   const a = Math.round((cl.x - 3) / G), bj = Math.round((cl.z + 1) / G); // cells (a,bj) and (a+1,bj)
   const X = (i) => i * G, Z = (j) => j * G;
   g.build.toggle();
@@ -68,10 +68,19 @@ await page.screenshot({ path: OUT + 'm1-cabin-hearth.png' }); console.log('saved
 // 2. the clearing at night, stars out (looking up over the trees)
 await shot('m1-clearing-night.png', () => {
   const g = __game, cl = g.cave.clearing, h = __h;
-  g.dayNight.tod = 960; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0;
+  g.dayNight.tod = 960; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0; g.dayNight.rainL = 0;
   h.stand(cl.x + 6, cl.z - 5, cl.x - 4, cl.z + 6, 0.32);
   h.friends(cl.x + 4.2, cl.z - 2.6, cl.x + 5.2, cl.z - 3.2);
 }, 4000);
+
+// 2b. the clearing on a rainy night (§8.3 rain floor): Wren, Biscuit and the near ground should read
+await shot('m1-night-rain.png', () => {
+  const g = __game, cl = g.cave.clearing, h = __h;
+  g.dayNight.tod = 960; g.dayNight.forceRain = true; g.dayNight.weather = 'rain'; g.dayNight.rainK = 1; g.dayNight.rainL = 1;
+  h.stand(cl.x + 9, cl.z - 6, cl.x + 4, cl.z - 1, -0.12);
+  h.friends(cl.x + 6.6, cl.z - 3.8, cl.x + 7.4, cl.z - 4.6);
+}, 4000);
+await page.evaluate(() => { const d = __game.dayNight; d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; });
 
 await page.evaluate((v) => { window.__DYAW = v; }, +(process.env.DYAW || 0.35));
 // 3. the Glowmere with wisps (lantern on, wisps drifting over the water)

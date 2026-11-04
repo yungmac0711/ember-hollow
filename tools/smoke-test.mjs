@@ -128,12 +128,15 @@ m1.chop = await page.evaluate(async () => {
   g.player.pos.set(px, g.cave.floorAt(px, pz), pz);
   g.player.yaw = Math.atan2(-(t.pos.x - px), -(t.pos.z - pz)); g.player.pitch = -0.1;
   g.puppy.pos.set(px - (t.pos.x - px) * 2, g.puppy.pos.y, pz - (t.pos.z - pz) * 2); // keep Biscuit behind Cam
-  await wait(150);
-  const label = g.hud.interactBtn?.textContent || document.getElementById('btn-interact')?.textContent;
+  // polish: wait for the prompt, then hold until the chop lands (game time is clamped per frame, so a
+  // slow high-tier frame rate used to run out the old fixed 2.2 s hold: woodGained 0, treeAlive true)
+  let label = '';
+  for (let k = 0; k < 20 && !/chop/i.test(label); k++) { await wait(150); label = document.getElementById('btn-interact')?.textContent || ''; }
   const w0 = g.player.inventory.wood;
   g.input.held.add('interact'); await wait(900);
   const ring = document.getElementById('ring').classList.contains('hidden') ? 'none' : 'shown';
-  await wait(1300); g.input.held.delete('interact');
+  for (let k = 0; k < 40 && t.alive && g.player.inventory.wood === w0; k++) await wait(200);
+  g.input.held.delete('interact');
   return { label, ringShown: ring !== 'none', woodGained: g.player.inventory.wood - w0, treeAlive: t.alive };
 });
 // 2. press-and-hold a rock on the touch look side (real CDP touch)
@@ -461,21 +464,28 @@ const m3 = {};
 const m4 = {};
 {
   const center = (sel) => page.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2, r.x, r.width]; });
-  const tapSel = async (sel) => { const b = await center(sel); await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(250); };
+  const tapSel = async (sel) => { await page.$eval(sel, (e) => e.scrollIntoView({ block: 'nearest' })); const b = await center(sel); await page.touchscreen.tap(b[0], b[1]); await page.waitForTimeout(250); };
   await page.evaluate(() => window.addEventListener('click', window.__dropClicks, true)); // iOS: trusted clicks swallowed again
   // Settings through real touch: pause → Settings → master slider at ~25% → invert-Y → tier Low (pending) → Auto → close → resume
   await tapSel('#btn-pause'); await tapSel('#pause-settings');
   const open = await page.evaluate(() => !document.getElementById('settings').classList.contains('hidden'));
   const sl = await center('#set-master'); await page.touchscreen.tap(sl[2] + sl[3] * 0.25, sl[1]); await page.waitForTimeout(250);
-  await tapSel('#set-invert'); await tapSel('#set-tier [data-tier="low"]');
+  await tapSel('#set-invert'); await tapSel('#set-fps'); await tapSel('#set-tier [data-tier="low"]');
   const mid = await page.evaluate(() => ({ s: { ...__game.settings.s }, stored: JSON.parse(localStorage.getItem('ember_hollow.settings') || '{}'), reloadShown: !document.getElementById('set-reload').classList.contains('hidden'),
-    inv: __game.player.invertY, master: __game.audio.vol.master }));
+    inv: __game.player.invertY, master: __game.audio.vol.master, urlLow: new URLSearchParams(location.search).get('low') === '1',
+    // polish: the tier applies live (pixel-ratio cap + cull distances); the light pool waits for a restart
+    pxCap: __game.renderer.getPixelRatio() <= 1.25 + 1e-6, cull: Math.sqrt(__game.instCull.sets[0].d2) / __game.instCull.sets[0].d0, note: document.getElementById('set-note').textContent }));
   await page.screenshot({ path: OUT + 'test-output/13-settings.png' });
   await tapSel('#set-tier [data-tier="auto"]'); await tapSel('#set-invert'); await tapSel('#settings-close');
   const back = await page.evaluate(() => ({ pauseShown: !document.getElementById('pause').classList.contains('hidden'), tier: __game.settings.s.tier, inv: __game.player.invertY }));
   await tapSel('#pause-resume');
+  await page.waitForTimeout(2300); // Show FPS readout: 1 s avg + 1% low, draw calls, tier, under the pause button
+  back.fps = await page.evaluate(() => { const e = document.getElementById('fps'), r = e.getBoundingClientRect(), p = document.getElementById('btn-pause').getBoundingClientRect();
+    const out = { shown: !e.classList.contains('hidden'), text: e.textContent, stats: __game.hud.fpsStats, clearOfPause: r.top >= p.bottom - 1 };
+    __game.settings.s.showFps = false; __game.settings._changed(); out.off = e.classList.contains('hidden') === (new URLSearchParams(location.search).get('fps') !== '1'); return out; });
   m4.settings = { open, mid, back, pass: open && mid.s.master > 0.1 && mid.s.master < 0.45 && mid.stored.master === mid.s.master && mid.stored.invertY === true && mid.inv === true
-    && mid.stored.tier === 'low' && mid.reloadShown && back.pauseShown && back.tier === 'auto' && back.inv === false && Math.abs(mid.master - mid.s.master) < 1e-6 };
+    && mid.stored.tier === 'low' && mid.reloadShown === !mid.urlLow && mid.pxCap && Math.abs(mid.cull - 0.93) < 1e-3 && mid.stored.showFps === true
+    && back.fps.shown && /fps · 1% \d+\n\d+ calls · (low|high)/.test(back.fps.text) && back.fps.stats?.calls > 0 && back.fps.clearOfPause && back.fps.off && back.pauseShown && back.tier === 'auto' && back.inv === false && Math.abs(mid.master - mid.s.master) < 1e-6 };
   await page.evaluate(() => window.removeEventListener('click', window.__dropClicks, true));
   // Audio: buffers decoded, footsteps by surface, no <audio> elements
   m4.audio = await page.evaluate(() => { const a = __game.audio; return { state: a.ctx?.state, stats: JSON.parse(JSON.stringify(a.stats)), audioTags: document.querySelectorAll('audio').length }; });
@@ -494,15 +504,15 @@ const m4 = {};
   await tapSel('#btn-interact'); await page.waitForTimeout(2200);
   Object.assign(m4.glowmere, await page.evaluate(() => { const g = __game, p = g.player;
     return { seated: !!p.seat, sitE: +(p.sitE || 0).toFixed(2), camBack: +Math.hypot(g.camera.position.x - p.pos.x, g.camera.position.z - p.pos.z).toFixed(2), sitTrig: g.ambient.log.some((l) => l.name === 'glowmere_sit'),
-      wren: g.wren.state, fov: +g.camera.fov.toFixed(1), standLabel: document.querySelector('#btn-interact .label').textContent }; }));
+      wren: g.wren.state, standIn: !!g.camStandIn?.root?.visible, fov: +g.camera.fov.toFixed(1), standLabel: document.querySelector('#btn-interact .label').textContent }; }));
   await page.screenshot({ path: OUT + 'test-output/14-glowmere-sit.png' });
   await touch('touchStart', [{ x: 150, y: 280, id: 1 }]);
   for (let k = 1; k <= 10; k++) { await touch('touchMove', [{ x: 150, y: 280 - k * 6, id: 1 }]); await page.waitForTimeout(40); }
   await page.waitForTimeout(300); await touch('touchEnd', []); await page.waitForTimeout(400);
-  m4.glowmere.stoodUp = await page.evaluate(() => !__game.player.seat && !__game.wren.seat);
+  m4.glowmere.stoodUp = await page.evaluate(() => !__game.player.seat && !__game.wren.seat && !__game.camStandIn?.root?.visible);
   const G = m4.glowmere;
   G.pass = G.area === 'glowmere' && G.enter && G.calls <= 60 && G.tris <= 80000 && G.lights <= 2 && G.note && G.label === 'Sit by the water' && G.seated && G.sitE > 0.9 && G.camBack > 1
-    && G.sitTrig && G.wren === 'seat' && G.standLabel === 'Stand up' && G.stoodUp;
+    && G.sitTrig && G.wren === 'seat' && G.standIn && G.wisps === 10 && G.standLabel === 'Stand up' && G.stoodUp;
   // Request chain: the lakeside bench (offered at the Glowmere) and the second lantern both finish; the bench seats two
   m4.chain = await page.evaluate(async () => {
     const g = __game, rq = g.requests, wait = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
@@ -545,7 +555,20 @@ const m4 = {};
     return out;
   });
   m4.chain.pass = m4.chain.benchOnlyAtGlowmere && m4.chain.benchOffer && m4.chain.bench && m4.chain.lanternOffer && m4.chain.lantern && m4.chain.placed && m4.chain.lakeRefused && m4.chain.seat === 'Sit on the bench';
-  m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.chain.pass;
+  // Polish: §8.3 night floor on the surface away from fires — clear, then rain eased in over 4 s; lantern 4.5 / 9
+  m4.night = await page.evaluate(async () => {
+    const g = __game, d = g.dayNight, cl = g.cave.clearing, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const x = cl.x + 9, z = cl.z - 6; g.player.pos.set(x, g.cave.floorAt(x, z), z); g.wren.pos.set(x + 1, g.cave.floorAt(x + 1, z), z);
+    d.tod = 960; d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; await wait(2500);
+    const snap = () => ({ hemi: +g.hemi.intensity.toFixed(3), ground: g.hemi.groundColor.getHexString(), fog: g.scene.fog.color.getHexString(), fireK: +g.ambientLight.k.toFixed(2), b: +d.b.toFixed(2), lantern: +g.wren.emitter.intensity.toFixed(2), dist: +g.wren.emitter.distance.toFixed(2) });
+    const clear = snap(); d.forceRain = true; d.weather = 'rain'; d.rainK = 1; await wait(4800); const rain = snap();
+    d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; d.tod = 120;
+    return { clear, rain };
+  });
+  { const N = m4.night, near = (a, b) => Math.abs(a - b) < 0.03;
+    N.pass = N.clear.b > 0.95 && N.clear.fireK > 0.99 && near(N.clear.hemi, 0.70) && N.clear.ground === '1a2230' && N.clear.fog === '2e3a52'
+      && near(N.rain.hemi, 0.80) && N.rain.ground === '1e2838' && N.rain.fog === '34405a' && N.rain.lantern > 4.0 && N.rain.dist > 8.8; }
+  m4.pass = m4.settings.pass && m4.audio.pass && m4.glowmere.pass && m4.night.pass && m4.chain.pass;
 }
 
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
