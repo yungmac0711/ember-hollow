@@ -72,7 +72,9 @@ export class Player {
     this.stillTime = this.speed < 0.3 ? this.stillTime + dt : 0;
 
     // Camera with a subtle head bob
+    const pb = this._bob;
     this._bob += this.onGround ? this.speed * dt * 2.2 : 0;
+    if (Math.floor(this._bob) !== Math.floor(pb) && this.speed > 0.8) this.onStep?.(); // one footfall per bob dip
     const bob = Math.sin(this._bob * Math.PI) * 0.035 * Math.min(1, this.speed / P.walkSpeed);
     this.camera.position.set(this.pos.x, this.pos.y + P.eyeHeight + bob, this.pos.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0);

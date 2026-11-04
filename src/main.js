@@ -162,6 +162,11 @@ async function init() {
   const player = new Player(camera, cave, spawn);
   player.yaw = 0.35;
   player.extraFloor = (x, z) => build.heightAt(x, z);
+  // footsteps by surface: wood on placed floors, grass out in the clearing, stone in the caves
+  player.onStep = () => {
+    const x = player.pos.x, z = player.pos.z;
+    audio.step(build.heightAt(x, z) > -Infinity && player.pos.y >= build.heightAt(x, z) - 0.02 ? 'wood' : cave.surfaceAt(x, z) > 0.5 ? 'grass' : 'stone');
+  };
   player.colliders = colliders;
   harvest.canRespawn = (n) => !build.pieces.some((p) => Math.hypot(p.x - n.pos.x, p.z - n.pos.z) < 1.4);
   build.blocked = (x, z, r) => harvest.nodes.some((n) => n.alive && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
@@ -545,7 +550,7 @@ async function init() {
       }
       case 'fuel': {
         const wasLit = a.fire.lit;
-        a.fire.addWood(1); inv.wood--; audio.blip(440);
+        a.fire.addWood(1); inv.wood--; audio.blip(440); audio.pop(0.8);
         hud.toast(wasLit ? 'The fire crackles brighter' : 'The embers catch again', 1.6);
         if (!wasLit) ambient.trigger('fire_lit');
         break;
@@ -553,7 +558,7 @@ async function init() {
       case 'fire': {
         inv.wood -= FC.woodToBuild; inv.flint -= FC.flintToBuild;
         fires.build(a.spot, FC.woodToBuild);
-        hud.toast('🔥 Campfire lit!', 2.5); audio.blip(330);
+        hud.toast('🔥 Campfire lit!', 2.5); audio.blip(330); audio.pop(1);
         ambient.trigger('fire_lit');
         memory.addFact('milestone', 'Cam lit their first campfire in the Hollow', 3);
         break;
@@ -774,9 +779,6 @@ async function init() {
       if (it && !barkedItems.has(it) && ['flint', 'glowcap', 'crystal_shard'].includes(it.kind) && game.time - lastItemBark > 25 && puppy.bark('pickup', it.pos)) { barkedItems.add(it); lastItemBark = game.time; }
       const bed = build.find('biscuit_bed');
       puppy.bed = bed?.sleepPoint || null;
-      // wind chime: a soft tinkle now and then when Cam is near one
-      const ch = build.find('crystal_wind_chime');
-      if (ch && Math.hypot(ch.x - player.pos.x, ch.z - player.pos.z) < 5 && Math.random() < 0.12) audio.chime(0.8);
     }
     // 10 minutes idle ends the session
     if (sessionOpen && performance.now() - lastActivity > 10 * 60 * 1000) endSession('idle');
@@ -830,8 +832,14 @@ async function init() {
     fogK += (target - fogK) * Math.min(1, dt * 0.35); // gentle
     scene.fog.density = THREE.MathUtils.lerp(R.fogCold, R.fogWarm, fogK);
     // audio follows the same fire
-    const al = fire && fire.lit ? fire.strength * Math.max(0, 1 - Math.hypot(fire.pos.x - player.pos.x, fire.pos.z - player.pos.z) / 12) : 0;
-    audio.update(dt, al);
+    const fd = fire ? Math.hypot(fire.pos.x - player.pos.x, fire.pos.z - player.pos.z) : 99;
+    const ch = build.find('crystal_wind_chime');
+    audio.update(dt, {
+      fire: fire && fire.lit ? { level: fire.strength, pos: fire.pos, prox: Math.max(0, 1 - fd / 12) } : null,
+      cam: camera, area: currentArea?.id || null, cave: 1 - cave.surfaceAt(player.pos.x, player.pos.z),
+      rain: dayNight.rainK * dayNight.b, roof: build.underRoof(player.pos), talking: chat.open,
+      chimeNear: !!ch && Math.hypot(ch.x - player.pos.x, ch.z - player.pos.z) < 5,
+    });
   }
 
   function updateHint() {
@@ -935,7 +943,6 @@ async function init() {
     if (surface.visible === false) dayNight.sky.visible = false;
     for (const v of ['pine', 'round', 'birch']) if (harvest.treeMeshes[v]) harvest.treeMeshes[v].visible = surface.visible !== false; // surface trees off deep in the cave
     if (!running) cooking.update(0, cp);
-    audio.rain?.(dayNight.rainK * dayNight.b, build.underRoof(player.pos));
     updateHint();
     hud.update(dt, renderer);
     input.clearFrame();

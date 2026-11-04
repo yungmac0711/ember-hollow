@@ -61,8 +61,10 @@ export class LightBudget {
     const ranked = this.emitters.filter((e) => e.score > 0).sort((a, b) => b.score - a.score);
     // Sun/moon slot. Drop-the-moon rule (§8.2): at night, if a campfire plus the rest want every slot,
     // the moon gives its slot up (DayNight raises the night hemi instead). The daytime sun always wins.
+    // Chunk D: Wren's lantern (priority 2) counts too, so on the surface at night it behaves as in §8.1
+    // (3.5 / 7, the exploration key light) even on the 1-slot low tier instead of losing to the moon.
     const inRange = ranked.filter((e) => e.score >= 10);
-    const dropMoon = this.isMoon && inRange.length >= this.slots.length && inRange.some((e) => e.priority >= 3);
+    const dropMoon = this.isMoon && inRange.length >= this.slots.length && inRange.some((e) => e.priority >= 2);
     const sunWants = this.sunTarget > 0.01 && !dropMoon;
     this.moonDropped += ((this.isMoon && dropMoon && this.sunTarget > 0.01 ? 1 : 0) - this.moonDropped) * Math.min(1, dt * 2);
     const nPoint = this.slots.length - (sunWants ? 1 : 0);
