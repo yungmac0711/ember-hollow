@@ -31,11 +31,23 @@ class Batch {
   add(parts, matrix, filter = null) {
     for (const part of parts) {
       if (filter && !filter(part)) continue;
-      const key = part.material.name || part.material.uuid;
-      if (!this.byMat.has(key)) this.byMat.set(key, { material: part.material, geos: [] });
+      // Chunk D perf: plain (untextured, non-emissive, opaque) materials share one vertex-colour mesh,
+      // so e.g. a torch's rock/wood/wrap/iron cost 1 draw call instead of 6. Emissive ones keep their own.
+      const m = part.material, plain = !m.map && !m.transparent && !(m.emissive && m.emissive.getHex() !== 0);
+      const key = plain ? 'plain' : (m.name || m.uuid);
+      if (!this.byMat.has(key)) {
+        let mat = m;
+        if (plain) { mat = m.clone(); mat.color.set(0xffffff); mat.vertexColors = true; mat.name = 'plain'; }
+        this.byMat.set(key, { material: mat, geos: [] });
+      }
       let g = part.geometry.index ? part.geometry.toNonIndexed() : part.geometry.clone();
       for (const a of Object.keys(g.attributes)) if (a !== 'position' && a !== 'normal') g.deleteAttribute(a);
       g.applyMatrix4(matrix);
+      if (plain) {
+        const n = g.attributes.position.count, c = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { c[i * 3] = m.color.r; c[i * 3 + 1] = m.color.g; c[i * 3 + 2] = m.color.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+      }
       this.byMat.get(key).geos.push(g);
     }
   }
