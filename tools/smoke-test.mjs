@@ -368,6 +368,93 @@ Object.assign(m2.note, await page.evaluate((id) => ({ readerClosed: document.get
 m2.pass = m2.bankAdapter === 'BankAdapter' && !!m2.bankReply && m2.pet.state === 'petted' && m2.fetch.fetched === 1 && m2.dig.found.length === 1
   && !!m2.request.completed && m2.note.readerOpen && m2.note.readerClosed && m2.note.inJournal;
 
+// ---------------------------------------------------------------- M1 chunk C: warmth, cooking, surface, day/night, sleep
+// Every new button is pressed with REAL CDP touch events while trusted clicks are swallowed (iOS).
+const m3 = {};
+{
+  await page.evaluate(() => { window.__dropClicks = (e) => { if (e.isTrusted && e.detail > 0) { e.stopImmediatePropagation(); e.preventDefault(); } }; window.addEventListener('click', window.__dropClicks, true); });
+  const center = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el || el.offsetParent === null) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+  const tapSel = async (sel) => { const pt = await center(sel); if (!pt) return false; await touch('touchStart', [{ x: pt.x, y: pt.y, id: 9 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(250); return true; };
+  const label = () => page.evaluate(() => document.querySelector('#btn-interact .label')?.textContent || '');
+  const lines = () => page.evaluate(() => __game.ambient.log.map((l) => l.name));
+  // cooking: a lit fire in Lanternmouth, Cam facing it with 1 mushroom + 1 glowcap
+  await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), c = g.cave.chambers[0], p = g.player;
+    g.closeAllPanels?.(); if (g.build.active) g.build.toggle();
+    const fx = c.x - 2, fz = c.z - 2.6; const f = g.fires.build(new g.THREE.Vector3(fx, g.cave.floorAt(fx, fz), fz), 4); window.__potFire = f;
+    p.pos.set(fx + 1.2, g.cave.floorAt(fx + 1.2, fz + 0.6), fz + 0.6); p.yaw = Math.atan2(-(fx - p.pos.x), -(fz - p.pos.z)); p.pitch = -0.35;
+    for (const it of g.items.list.slice()) if (it.alive && Math.hypot(it.pos.x - fx, it.pos.z - fz) < 4.5) g.items.pickUp(it);
+    p.inventory.mushroom = 1; p.inventory.glowcap = 1; p.inventory.wood = 0; p.inventory.stew = 0; g.wren.pos.set(c.x + 6, g.cave.floorAt(c.x + 6, c.z), c.z); g.puppy.pos.set(c.x + 5, g.cave.floorAt(c.x + 5, c.z + 1), c.z + 1);
+    await wait(500);
+  });
+  m3.cook = {};
+  m3.cook.slotMush = (await tapSel('#hotbar .slot[data-kind="mushroom"]')) && await page.evaluate(() => __game.invUI.selected === 'mushroom');
+  m3.cook.hangLabel = await label();
+  await tapSel('#btn-interact');
+  m3.cook.hung = await page.evaluate(() => { const pot = __game.cooking.potFor(window.__potFire); return pot ? { state: pot.state, ing: pot.ingredients.slice() } : null; });
+  m3.cook.slotGlow = (await tapSel('#hotbar .slot[data-kind="glowcap"]')) && await page.evaluate(() => __game.invUI.selected === 'glowcap');
+  m3.cook.addLabel = await label();
+  await tapSel('#btn-interact');
+  m3.cook.cooking = await page.evaluate(() => { const pot = __game.cooking.potFor(window.__potFire); return { state: pot.state, steam: pot.steam?.visible ?? null, line: __game.ambient.log.some((l) => l.name === 'stew_cooking') }; });
+  await page.evaluate(() => { __game.cooking.potFor(window.__potFire).t = 14.5; });
+  await page.waitForTimeout(1200);
+  m3.cook.takeLabel = await label();
+  await tapSel('#btn-interact');
+  m3.cook.took = await page.evaluate(() => ({ stew: __game.player.inventory.stew, selected: __game.invUI.selected }));
+  await page.evaluate(() => { __game.warmth = 20; });
+  await tapSel('#hotbar .slot[data-kind="stew"]'); // already selected → eat
+  m3.cook.ate = await page.evaluate(() => ({ stew: __game.player.inventory.stew, warmth: Math.round(__game.warmth), line: __game.ambient.log.some((l) => l.name === 'stew_eaten') }));
+  m3.cook.pass = m3.cook.slotMush && /stew pot/i.test(m3.cook.hangLabel) && m3.cook.hung?.ing.length === 1 && m3.cook.slotGlow && /glowcap/i.test(m3.cook.addLabel)
+    && m3.cook.cooking.state === 'cooking' && m3.cook.cooking.line && /take stew/i.test(m3.cook.takeLabel) && m3.cook.took.stew === 1 && m3.cook.ate.stew === 0 && m3.cook.ate.warmth >= 60 && m3.cook.ate.line;
+  await page.screenshot({ path: OUT + 'test-output/10-stew.png' });
+  // warmth: cold on the surface at night → frost + Wren's line + Biscuit snuggles; context carries it
+  m3.warm = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), cl = g.cave.clearing, p = g.player;
+    p.pos.set(cl.x + 2, g.cave.floorAt(cl.x + 2, cl.z + 2), cl.z + 2); g.dayNight.tod = 900; g.warmth = 30; await wait(300);
+    const w0 = g.warmth; g.warmth = 12; await wait(1700);
+    const ctx = (await import('./src/companion/context.js')).buildContextBlock(g.gameState());
+    return { drifts: g.warmth < w0, word: g.warmWord, frost: +getComputedStyle(document.getElementById('frost')).opacity, snuggle: !!g.puppy.snuggle,
+      line: g.ambient.log.some((l) => l.name === 'warmth_cold'), ctx: ctx.split('\n').filter((l) => /^(time|weather|warmth):/.test(l)), cold: document.getElementById('warmth').classList.contains('cold') };
+  });
+  m3.warm.pass = m3.warm.drifts && m3.warm.word === 'cold' && m3.warm.frost > 0.2 && m3.warm.snuggle && m3.warm.line && m3.warm.ctx.length === 3 && m3.warm.cold;
+  await page.screenshot({ path: OUT + 'test-output/11-cold-night.png' });
+  // sleep: open (dusk is over), tap "Not yet", reopen, tap ✕, reopen, tap "Sleep till morning"
+  m3.sleep = { taps: {} };
+  const open = () => page.evaluate(() => { __game.warmth = 60; __game.dayNight.tod = 760; __game.openSleep(); return !document.getElementById('sleep').classList.contains('hidden'); });
+  m3.sleep.opened = await open(); await tapSel('#sleep-no'); m3.sleep.taps.no = await page.evaluate(() => document.getElementById('sleep').classList.contains('hidden'));
+  await open(); await tapSel('#sleep-close'); m3.sleep.taps.close = await page.evaluate(() => document.getElementById('sleep').classList.contains('hidden'));
+  const d0 = await page.evaluate(() => __game.dayCount);
+  await open(); await tapSel('#sleep-yes');
+  await page.waitForTimeout(3600);
+  m3.sleep.after = await page.evaluate((d0) => { const g = __game, s = JSON.parse(localStorage.getItem('ember_hollow.save')); const names = g.ambient.log.map((l) => l.name);
+    return { dayCount: g.dayCount, d0, tod: Math.round(g.dayNight.tod), savedTod: Math.round(s.world?.tod ?? -1), savedDay: s.dayCount, goodnight: names.includes('goodnight'), goodMorning: names.includes('goodMorning'),
+      noSleepTriggers: !names.includes('sleep_start') && !names.includes('wake_morning'), faded: !document.getElementById('fade').classList.contains('on'), inputBack: g.input.enabled, biscuit: g.puppy.state }; }, d0);
+  m3.sleep.pass = m3.sleep.opened && m3.sleep.taps.no && m3.sleep.taps.close && m3.sleep.after.dayCount === d0 + 1 && m3.sleep.after.tod < 120 && m3.sleep.after.savedDay === d0 + 1
+    && m3.sleep.after.goodnight && m3.sleep.after.goodMorning && m3.sleep.after.noSleepTriggers && m3.sleep.after.faded && m3.sleep.after.inputBack;
+  await page.evaluate(() => window.removeEventListener('click', window.__dropClicks, true));
+  // surface + day/night perf: clearing day, clearing night + rain, cave mouth (both tiers via ?low=1 runs)
+  m3.perf = await page.evaluate(async () => {
+    const g = __game, wait = (ms) => new Promise((r) => setTimeout(r, ms)), cl = g.cave.clearing, p = g.player;
+    const place = (x, z, yaw) => { p.pos.set(x, g.cave.floorAt(x, z), z); p.yaw = yaw; p.pitch = -0.05; };
+    const shot = async () => { await wait(1600); const i = g.renderer.info.render; return { calls: i.calls, tris: i.triangles, lights: g.budget.activeCount, sky: g.dayNight.weather, tod: Math.round(g.dayNight.tod) }; };
+    const out = {};
+    g.dayNight.forceRain = false; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0;
+    place(cl.x + 3, cl.z + 4, 2.2); g.dayNight.tod = 200; out.clearingDay = await shot();
+    out.enterClearing = g.ambient.log.some((l) => l.name === 'enter_clearing');
+    g.dayNight.tod = 900; g.dayNight.forceRain = true; await wait(400); g.dayNight.rainK = 1; out.clearingNightRain = await shot();
+    out.rainStart = g.ambient.log.some((l) => l.name === 'rain_start');
+    g.dayNight.forceRain = false; g.dayNight.weather = 'clear'; g.dayNight.rainK = 0; await wait(300); g.dayNight.tod = 960; await wait(1200);
+    out.stars = g.ambient.log.some((l) => l.name === 'stars_visible');
+    const a = Math.atan2(-cl.z, -cl.x), R = 15.5, x = cl.x + Math.cos(a) * R, z = cl.z + Math.sin(a) * R;
+    place(x, z, Math.atan2(-(cl.x - x), -(cl.z - z))); g.dayNight.tod = 200; out.caveMouth = await shot();
+    return out;
+  });
+  const ok = (s) => s.calls <= 60 && s.tris <= 80000 && s.lights <= 2;
+  m3.perf.pass = ok(m3.perf.clearingDay) && ok(m3.perf.clearingNightRain) && ok(m3.perf.caveMouth) && m3.perf.enterClearing && m3.perf.rainStart && m3.perf.stars;
+  await page.screenshot({ path: OUT + 'test-output/12-cave-mouth.png' });
+  m3.pass = m3.cook.pass && m3.warm.pass && m3.sleep.pass && m3.perf.pass;
+}
+
 const perf = await page.evaluate(() => { const i = __game.renderer.info; let pl = 0; __game.scene.traverse((o) => { if (o.isPointLight) pl++; }); return { calls: i.render.calls, tris: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, webgl2: __game.renderer.capabilities.isWebGL2, pointLights: pl, activePointLights: __game.budget.activeCount, hemi: +__game.hemi.intensity.toFixed(2), wrenHoodUp: __game.wren.hoodUp, torches: __game.dressing.torches.length }; });
 // 5. 60-piece perf test: fill Lanternmouth + Mossdrip with a mix of pieces, then measure from the base
 m1.perf60 = await page.evaluate(async () => {
@@ -398,7 +485,7 @@ await page.screenshot({ path: OUT + 'test-output/06-sixty.png' });
 const saved = await page.evaluate(() => {
   const g = __game; g.player.inventory.mushroom = 7; g.saveNow('test');
   const d = JSON.parse(localStorage.getItem('ember_hollow.save'));
-  return { v: d.v, pieces: d.pieces.length, inv: d.inventory, notes: d.notes, done: d.requests.done, pos: d.player, chest: d.pieces.filter((p) => p.store).length };
+  return { tod: d.world?.tod, warmth: d.warmth, harvest: (d.harvest || []).length, v: d.v, pieces: d.pieces.length, inv: d.inventory, notes: d.notes, done: d.requests.done, pos: d.player, chest: d.pieces.filter((p) => p.store).length };
 });
 await page.reload({ waitUntil: 'load' });
 await page.waitForFunction(() => window.__game?.ready, null, { timeout: 60000 });
@@ -410,13 +497,13 @@ if (reload.continueShown) {
 Object.assign(reload, await page.evaluate((s) => {
   const g = __game;
   return { started: document.getElementById('start').classList.contains('hidden'), pieces: g.build.pieces.length, mushroom: g.player.inventory.mushroom,
-    notesRead: g.lore.read.size, requestsDone: g.requests.done.size, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2) };
+    notesRead: g.lore.read.size, requestsDone: g.requests.done.size, tod: g.dayNight.tod, warmth: g.warmth, dPos: +Math.hypot(g.player.pos.x - s.pos.x, g.player.pos.z - s.pos.z).toFixed(2) };
 }, saved));
-reload.pass = reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5;
+reload.pass = reload.continueShown && reload.started && reload.pieces === saved.pieces && reload.mushroom === 7 && reload.notesRead === saved.notes.length && reload.requestsDone === saved.done.length && reload.dPos < 0.5 && Math.abs(reload.tod - saved.tod) < 5 && Math.abs(reload.warmth - saved.warmth) < 3;
 await page.screenshot({ path: OUT + 'test-output/09-continue.png' });
 
 const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker?.getRegistration(); return r ? (r.active || r.installing || r.waiting)?.state : 'none'; });
 
-console.log(JSON.stringify({ title, m2, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
+console.log(JSON.stringify({ title, m2, m3, saved, reload, moved: moved.toFixed(2), turned: turned.toFixed(2), result: { ...result, ctx: undefined }, settle, spawnPerf, perf, sw, chatLog, memoryKeys: Object.keys(mem || {}), memorySummary: mem?.memory_summary, ctxBlock, m1, errors, warnings, failed }, null, 2));
 await browser.close();
-process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !reload.pass ? 1 : 0);
+process.exit(errors.length || failed.length || !m1.touchUI?.pass || !title.pass || !m2.pass || !m3.pass || !reload.pass ? 1 : 0);

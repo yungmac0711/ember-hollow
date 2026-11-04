@@ -192,6 +192,30 @@ wood to light it). The chest has its own storage panel; tap a stack to move it.
   - Audio unlocks on the first tap.
   - A "rotate to landscape" screen in portrait.
 
+## What's in M1 chunk C
+
+- **Day/night** (STYLE_GUIDE §8.2, `src/render/daynight.js`): a 24-min cycle (day 10, dusk 2, night 10,
+  dawn 2). The sun/moon is one no-shadow DirectionalLight that borrows a LightBudget slot; the moon
+  gives its slot back when a priority-3 emitter (a fire) needs it. The surface look blends over the
+  §8.1 cave ambient by `smoothstep(0, 6, depthIntoCave)`, so the cave keeps §8.1. Sky dome with
+  twinkling stars, occasional rain (600 drops low tier / 1200 high, a camera-following box, surface
+  only, masked under roofs) and procedural rain audio (muffled under a roof).
+- **Surface clearing** outside Lanternmouth: instanced pine/round/birch trees (choppable in the bowl,
+  deco on the cliff rim), bushes, glowberry bushes, three grass tufts, clearing pickups, and the
+  clearing lore note on a birch. Static instanced decor (cave and clearing) is culled per instance
+  against the frustum and fog distance (`src/render/instcull.js`).
+- **Warmth** (HUD bar top-right): warms by a lit fire or in an enclosed shelter, drifts down
+  elsewhere, faster on the surface at night or in rain. No damage: cold only brings a frost vignette,
+  Wren's `warmth_cold` line and Biscuit pressing close. Fed to Wren's context as `warmth:`, with
+  `time:` and `weather:`.
+- **Cooking:** at a lit fire or hearth, select a mushroom or glowcap and Use → *Hang stew pot*, add 2
+  ingredients, wait 15 s (steam), *Take stew*. Tap the selected stew slot again to eat: +45 warmth and
+  no drift for 2 min.
+- **Sleep:** Use the bed roll after the day ends → *Sleep till morning* fades out, skips to morning,
+  Day +1, autosaves, with goodnight / good-morning lines. Biscuit curls up on his bed or by Cam.
+- **Save** adds the time of day, weather, warmth, chopped/collected state with respawn timers, and
+  stew pots.
+
 ## Install on iPhone (Safari)
 
 1. Open the game's **HTTPS** URL in **Safari**. Other iOS browsers can't install PWAs reliably.
@@ -315,12 +339,18 @@ The test emulates an iPhone in landscape (844×390, touch). It:
   a bank chat reply, a request offered → needs carried → *Give to Wren* by touch → completed, a note
   opened and closed by touch → in the journal, then save → reload → *Continue* restores pieces, pack,
   notes, requests and position (`title`, `m2`, `reload`)
+- chunk C (`m3`), with real CDP taps and trusted clicks swallowed: mushroom/glowcap hotbar slots,
+  Use → hang pot / add / take stew, stew slot tap-again to eat (+ `stew_cooking`/`stew_eaten`), cold at
+  night on the surface (frost, `warmth_cold`, Biscuit snuggles, context lines), the sleep panel's
+  *Not yet* / ✕ / *Sleep till morning* (Day +1, saved, goodnight/goodMorning, no sleep_start), and
+  perf in the clearing by day, the clearing at night in rain, and the cave mouth (≤60 calls, ≤80k
+  tris, ≤2 lights); `reload` also checks time of day and warmth
 - confirms the service worker activates
 
 Screenshots go to `docs/screenshot.png` and `docs/test-output/`. The perf block reports draw calls,
 triangles, real point lights and how many are active, the hemisphere intensity, and Wren's hood.
 Add `QUERY=low=1` to test the low tier. It exits non-zero on any error, failed request, or failed
-`touchUI` / `title` / `m2` / `reload` check.
+`touchUI` / `title` / `m2` / `m3` / `reload` check.
 
 `node tools/screenshots.mjs` saves the art-review shots (1688×780) to `screenshots/`: the lit
 campfire with Wren and Biscuit, a crystal chamber, and a torchlit tunnel.

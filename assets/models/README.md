@@ -1,4 +1,4 @@
-# Models used by the game (M0 + M1 chunks A/B)
+# Models used by the game (M0 + M1 chunks A/B/C)
 
 Only the files in use are here. Everything was copied from `../../art/assets`.
 
@@ -28,6 +28,10 @@ converts them to flat Lambert. `KHR_materials_emissive_strength` lands in `emiss
 
 | build/lakeside_bench.glb | build piece: lakeside bench (unlocked by a request) | `benchPiece` |
 | decor/herb_bundle.glb, woven_rug.glb, biscuit_bed.glb, crystal_wind_chime.glb | decorations from Wren's requests (rug on floors, bundle/chime hang under a roof, bed has a `sleep_point`) | `herbBundle`, `wovenRug`, `biscuitBed`, `windChime` |
+| surface/tree_pine.glb, tree_round.glb, tree_birch.glb (chunk C) | clearing trees: choppable in the bowl, deco on the rim, one birch carries the clearing note | `treePine`, `treeRound`, `treeBirch` |
+| surface/bush_1.glb, bush_glowberry.glb (chunk C) | clearing bushes (glowberries: emissive MeshBasic instance, no light) | `bush1`, `bushGlowberry` |
+| surface/grass_tuft_1..3.glb (chunk C) | clearing grass, instanced | `grass1`–`grass3` |
+| props/stew-pot.glb (chunk C) | cooking pot on a fire/hearth (`pot` + `embers` nodes; embers unlit glow while cooking) | `stewPot` |
 | keepsakes/*.glb (brass_button, blue_marble, tin_whistle, feather_owl, waylamp_key, keeper_charm, tiny_lantern) | Biscuit's keepsake finds, placed on a table or chest top | `ks_*` |
 | lore/note_paper.glb, journal_page.glb, note_slate.glb, waylamp_hook.glb | lore notes in the world (merged into one mesh + one glow mesh) | `loreNote`, `loreJournal`, `loreSlate`, `loreHook` |
 
@@ -55,6 +59,12 @@ Each pack keeps its `Textures/` folder beside the GLBs, because the GLBs referen
 | nature/mushroom_red.glb | mushroom pickups | `mushroomRed` |
 
 Root trees, glowcap and crystal-shard pickups are procedural (`src/entities/harvest.js`, `src/entities/items.js`).
+
+## Textures (`../textures/`, chunk C)
+
+`stars_512.png` (sky-dome stars) and `rain_streak.png` (rain drops), from art/assets/surface. The sky,
+star and rain colours/values from `art/assets/surface/sky_rain.json` are transcribed into
+`src/render/daynight.js` (the JSON itself isn't shipped).
 
 ## Icons (`../icons/`, 128 px, from art/assets/icons)
 
