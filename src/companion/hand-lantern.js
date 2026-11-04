@@ -57,29 +57,54 @@ export class HandLantern {
   /**
    * @param model  loadScene('handLantern') result (or null → a small primitive lantern)
    */
-  constructor(camera, model, budget) {
+  constructor(camera, model, budget, wayModel = null) {
     this.camera = camera;
     this.on = true;        // lit / stowed (hotbar toggle, saved)
     this.has = true;       // in the pack (it can be stored in a chest; tap the empty slot to make another)
     this.k = 0;            // 0..1 light fade
     this.emitter = budget.add(new Emitter({ color: HL.color, intensity: 0, distance: HL.distance, decay: HL.decay, priority: HL.priority }));
-    this.src = model?.root || primitiveLantern();
-    // first-person prop: camera → fp (lower right) → swing (plumb + sway)
+    this.srcs = { hand_lantern: model?.root || primitiveLantern(), waylamp: wayModel?.root || null };
+    this.src = this.srcs.hand_lantern;
+    // first-person prop: camera → fp (lower right) → swing (plumb + sway); one swing per variant
     const fp = new THREE.Group(); fp.name = 'fp-lantern';
     fp.position.fromArray(HL.fp.pos); fp.scale.setScalar(HL.fp.scale);
-    const { swing, meshes } = bakeLantern(this.src, false);
-    fp.add(swing); camera.add(fp);
-    meshes.forEach((m, i) => {
-      // drawn after everything else over a cleared depth buffer: never pokes into a wall in front of Cam
-      m.material.transparent = true; m.material.depthWrite = true; m.renderOrder = 1000 + i; m.frustumCulled = false;
-      m.material.fog = false;
-    });
-    meshes[0].onBeforeRender = (renderer) => { renderer.state.buffers.depth.setMask(true); renderer.clearDepth(); };
-    this.fp = fp; this.fpSwing = swing;
+    this.fpSwings = {};
+    for (const [kind, src] of Object.entries(this.srcs)) {
+      if (!src) continue;
+      const { swing, meshes } = bakeLantern(src, false);
+      swing.visible = kind === 'hand_lantern';
+      fp.add(swing); this.fpSwings[kind] = swing;
+      meshes.forEach((m, i) => {
+        // drawn after everything else over a cleared depth buffer: never pokes into a wall in front of Cam
+        m.material.transparent = true; m.material.depthWrite = true; m.renderOrder = 1000 + i; m.frustumCulled = false;
+        m.material.fog = false;
+      });
+      meshes[0].onBeforeRender = (renderer) => { renderer.state.buffers.depth.setMask(true); renderer.clearDepth(); };
+    }
+    camera.add(fp);
+    this.fp = fp; this.fpSwing = this.fpSwings.hand_lantern;
     this.lightLocal = new THREE.Vector3().fromArray(HL.light);
+    this.kind = 'hand_lantern'; this.spec = HL;
     this.gain = HL.gain || 1;
     this.sx = 0; this.sz = 0; this.vx = 0; this.vz = 0; this._yaw = null; this.t = 0;
     this.seatLamp = null; // set by CamSeated each frame while seated: { swing, root }
+    this.onVariant = null; // (kind) => void — cam.js swaps the seated copy
+  }
+
+  /** M2 chunk B: 'hand_lantern' | 'waylamp' (the waylamp replaces the hand lantern in the same slot). */
+  setVariant(kind) {
+    if (kind === this.kind) return;
+    this._applySpec(kind);
+    for (const [k, sw] of Object.entries(this.fpSwings)) sw.visible = k === kind;
+    this.fpSwing = this.fpSwings[kind] || this.fpSwings.hand_lantern;
+    if (this.srcs[kind]) this.src = this.srcs[kind];
+    this.onVariant?.(kind);
+  }
+  _applySpec(kind) {
+    this.kind = kind;
+    this.spec = kind === 'waylamp' ? { ...HL, ...CONFIG.waylamp } : HL;
+    this.emitter.color.set(this.spec.color);
+    this.gain = this.spec.gain || 1;
   }
 
   /** Seated Cam's own copy (Lambert, world-lit), for cam.js to parent to elbow_R. */
@@ -113,11 +138,12 @@ export class HandLantern {
       this.camera.updateMatrixWorld(true);
       plumb(this.fpSwing, _yq.setFromEuler(_e.set(0, yaw, 0)), sx, sz);
     }
-    // light: 3.5 / 8; surface at night away from a fire 4.5 / 9
-    const ns = env.inFire ? 0 : (env.nightSurface || 0);
-    const I = THREE.MathUtils.lerp(HL.intensity, HL.night.intensity, ns), D = THREE.MathUtils.lerp(HL.distance, HL.night.distance, ns);
-    this.emitter.distance = D;
-    const gain = THREE.MathUtils.lerp(this.gain, 1, THREE.MathUtils.clamp(env.daylight || 0, 0, 1)); // the path gain is for the dark: plain spec in daylight
+    // light: 3.5 / 8; surface at night away from a fire 4.5 / 9 (waylamp 4.5 / 10, night 5.5 / 11)
+    const S = this.spec, ns = env.inFire ? 0 : (env.nightSurface || 0), day = THREE.MathUtils.clamp(env.daylight || 0, 0, 1);
+    const I = THREE.MathUtils.lerp(S.intensity, S.night.intensity, ns), D = THREE.MathUtils.lerp(S.distance, S.night.distance, ns);
+    // Art-approved: in the dark the pool reaches darkDistance (11 m; waylamp 13.75), daylight keeps the spec
+    this.emitter.distance = THREE.MathUtils.lerp(Math.max(D, S.darkDistance || D), D, day);
+    const gain = THREE.MathUtils.lerp(this.gain, 1, day); // the path gain is for the dark: plain spec in daylight
     this.emitter.intensity = I * gain * this.k * (0.97 + Math.sin(this.t * 11) * 0.02 + Math.sin(this.t * 4.3) * 0.01);
     if (seated?.swing) {
       seated.swing.updateWorldMatrix(true, false);

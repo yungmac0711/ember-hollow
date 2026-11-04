@@ -135,8 +135,8 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
-  const [surfParts, stewPotP, camSitUp, camSitDown, handLanternM] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
-    loadScene('camSit'), loadScene('camSitHoodDown'), loadScene('handLantern'), loadIconAtlas()]); // Cam, seated only (Art's cam-sit*.glb, provisional look)
+  const [surfParts, stewPotP, camSitUp, camSitDown, handLanternM, waylampM] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
+    loadScene('camSit'), loadScene('camSitHoodDown'), loadScene('handLantern'), loadScene('waylamp'), loadIconAtlas()]); // Cam, seated only (Art's cam-sit*.glb, provisional look)
   const gmP = {}; // Chunk D: the Glowmere set
   await Promise.all(['water', 'rock1', 'rock2', 'cap1', 'cap2', 'cap3', 'reeds', 'lily1', 'lily2'].map(async (k) => {
     gmP[k] = await loadParts('gm' + k[0].toUpperCase() + k.slice(1), raw);
@@ -190,8 +190,9 @@ async function init() {
   const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
   hud.initGlyphs();
   // M2 chunk A: Cam's hand lantern (first-person prop + one budget emitter; seated Cam holds a copy)
-  const lantern = new HandLantern(camera, handLanternM, budget);
+  const lantern = new HandLantern(camera, handLanternM, budget, waylampM);
   const cam = new CamSeated(scene, camSitUp, camSitDown, () => lantern.makeSeated());
+  lantern.onVariant = (kind) => { cam.setLamp(() => lantern.makeSeated()); invUI?.setLanternKind?.(kind); }; // M2 chunk B: waylamp
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
@@ -315,7 +316,7 @@ async function init() {
   // M2 chunk A: light / stow Cam's hand lantern; if it's gone (left in a chest) make a new one
   function toggleLantern() {
     const inv = player.inventory;
-    if (!((inv.hand_lantern || 0) > 0)) {
+    if (!((inv.hand_lantern || 0) > 0) && !((inv.waylamp || 0) > 0)) {
       const R = CONFIG.handLantern.recipe, cost = Object.entries(R).map(([k, n]) => `${n} ${ITEM_INFO[k]?.label || k}`).join(' + ');
       if (!Object.entries(R).every(([k, n]) => (inv[k] || 0) >= n)) { hud.toast(`Hand lantern: needs ${cost}`, 2.4); return false; }
       for (const [k, n] of Object.entries(R)) inv[k] -= n;
@@ -1033,7 +1034,8 @@ async function init() {
       },
     });
     cam.update(dt, player.seat, wren.hoodUp, lantern.lit); // after Wren, so Cam's hood matches hers this frame
-    lantern.has = (player.inventory.hand_lantern || 0) > 0;
+    lantern.has = (player.inventory.hand_lantern || 0) > 0 || (player.inventory.waylamp || 0) > 0;
+    lantern.setVariant((player.inventory.waylamp || 0) > 0 ? 'waylamp' : 'hand_lantern');
     { const lf = fires.nearest(player.pos, Infinity, true);
       lantern.update(dt, { player, seated: cam.lamp, inFire: !!lf && Math.hypot(player.pos.x - lf.pos.x, player.pos.z - lf.pos.z) < lf.lightRadius,
         nightSurface: dayNight.nightness * dayNight.b, daylight: (1 - dayNight.nightness) * dayNight.b, hideFp: !running, floorAt: (x, z) => Math.max(cave.floorAt(x, z), build.heightAt(x, z)) }); }

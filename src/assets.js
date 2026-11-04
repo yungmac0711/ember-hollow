@@ -3,8 +3,20 @@
 // load fails — we use the primitive placeholder factory. This lets the Art Director drop models in
 // later (copy them to game/assets/models/ and set the URL in config.js) without touching gameplay code.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
+import { CONFIG, TIER } from './config.js';
+import { LOW_LOD } from './data/lod-manifest.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// M2 chunk B: low-tier LOD hook. Art's -low GLBs (wren-low, cam-*-low, biscuit-*-low: same node tree,
+// joints and face parts) land next to the originals; on the low tier any model whose `<name>-low.glb`
+// is listed in the build-time manifest loads that file instead. No manifest entry → the original.
+const LOW_SET = new Set(LOW_LOD);
+export function modelUrl(name) {
+  const url = CONFIG.assets.models[name];
+  if (!url || !TIER.low) return url;
+  const low = url.replace(/\.glb$/i, '-low.glb');
+  return LOW_SET.has(low) ? low : url;
+}
 
 let _loader = null;
 async function gltfLoader() {
@@ -21,7 +33,7 @@ async function gltfLoader() {
  * @returns {Promise<{root: THREE.Object3D, parts: object, animations: THREE.AnimationClip[], fromFile: boolean}>}
  */
 export async function loadModel(name, factory) {
-  const url = CONFIG.assets.models[name];
+  const url = modelUrl(name);
   if (url) {
     try {
       const loader = await gltfLoader();
@@ -73,7 +85,7 @@ export function lambert(color, extra = {}) {
  * @returns {Promise<Array<{geometry: THREE.BufferGeometry, material: THREE.Material}>|null>}
  */
 export async function loadParts(name, opts = {}) {
-  const url = CONFIG.assets.models[name];
+  const url = modelUrl(name);
   if (!url) return null;
   try {
     const loader = await gltfLoader();
@@ -115,7 +127,7 @@ export async function loadParts(name, opts = {}) {
 
 /** Load + normalise a full model (keeps hierarchy, skinning and animations). */
 export async function loadScene(name, { height } = {}) {
-  const url = CONFIG.assets.models[name];
+  const url = modelUrl(name);
   if (!url) return null;
   try {
     const loader = await gltfLoader();

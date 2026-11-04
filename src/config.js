@@ -126,9 +126,16 @@ export const CONFIG = {
     light: [0.2, -0.6, -2.6], floorLift: 0.7, // emitter: right / up / forward of the eye in Cam's yaw frame (lights the path, not the sky), held 0.7 m over the floor
     // path gain over the 3.5 / 8 (4.5 / 9) spec: at exactly 3.5 cd the pool on the dark cave floor barely
     // reads (measured, m2a screenshots); 1.8 makes the dark clearly better. Set 1 for the literal spec.
-    gain: 1.8,
-    recipe: { wood: 2, stone: 1, glowcap: 1 }, // placeholder until the bench (tap the empty slot to make one)
+    gain: 1.8, // Art-approved (M2 chunk B)
+    // ...and in the dark the pool reaches 11 m (Art-approved); daylight keeps the 8 m spec. Blended by
+    // daylight like the gain, so dusk eases between them. If the near floor reads hot, lower gain to 1.6.
+    darkDistance: 11,
+    recipe: { wood: 2, stone: 1, glowcap: 1 }, // placeholder (recipes.json has no hand_lantern): tap the empty slot to make one
   },
+  // M2 chunk B: the Ch5 waylamp (art/assets/craft/waylamp.glb, 304 tris) — crafted FROM the hand lantern at
+  // the bench and takes its hotbar slot. 4.5 / 10 (night 5.5 / 11); the same dark gain, and the dark distance
+  // scaled by 10/8 like the hand lantern's 11/8.
+  waylamp: { color: 0xe08a2e, intensity: 4.5, distance: 10, night: { intensity: 5.5, distance: 11 }, gain: 1.8, darkDistance: 13.75 },
   puppy: { name: 'Biscuit' },
   // LLM provider for companion chat. 'bank' = Wren's offline reply bank from story/wren_replies.json (default, no network);
   // 'stub' = the old M0 canned replies (fallback).
@@ -158,6 +165,7 @@ export const CONFIG = {
       camSit: 'assets/models/characters/cam/cam-sit.glb', // Cam is only seen seated (hood up / down)
       camSitHoodDown: 'assets/models/characters/cam/cam-sit-hood-down.glb',
       handLantern: 'assets/models/craft/hand_lantern.glb', // M2: Cam's starting lantern (held)
+      waylamp: 'assets/models/craft/waylamp.glb', // M2 chunk B: replaces it (held)
       campfire: 'assets/models/campfire/campfire-pit.glb',
       stick: 'assets/models/props/resource-wood.glb',
       stone: 'assets/models/props/resource-stone.glb',

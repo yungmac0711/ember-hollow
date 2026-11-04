@@ -121,6 +121,13 @@ export class InventoryUI {
     this.lanternBtn.classList.toggle('empty', !has);
     if (this._lkInit) this.wake(); this._lkInit = true;
   }
+  /** M2 chunk B: the waylamp takes the hand lantern's slot. */
+  setLanternKind(kind) {
+    if (this._lkind === kind) return; this._lkind = kind;
+    this.lanternBtn.dataset.kind = kind;
+    this.lanternBtn.title = `${label(kind)} · ${desc(kind)} (L)`;
+    this.lanternBtn.innerHTML = icon(kind);
+  }
   /** Any touch on the bar or a change in the pack brings it back to full opacity. */
   wake() { this._wakeT = performance.now(); this.hotbar.classList.remove('idle'); }
 

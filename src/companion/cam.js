@@ -39,6 +39,15 @@ export class CamSeated {
     this.hoodUp = null; this.t = 0;
   }
 
+  /** M2 chunk B: the waylamp replaced the hand lantern — swap the seated copy on every variant. */
+  setLamp(makeLantern) {
+    for (const v of Object.values(this.variants)) {
+      if (!v.lamp) continue;
+      v.lamp.remove(v.lamp.userData.swing);
+      const swing = makeLantern(); v.lamp.add(swing); v.lamp.userData.swing = swing;
+    }
+  }
+
   setHood(up) {
     if (this.hoodUp === up) return;
     this.hoodUp = up;
