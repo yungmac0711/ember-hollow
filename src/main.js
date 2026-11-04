@@ -14,6 +14,7 @@ import { Player } from './entities/player.js';
 import { Items, ITEM_INFO } from './entities/items.js';
 import { Puppy, buildPuppyPrimitive } from './entities/puppy.js';
 import { FireSystem } from './fire/campfire.js';
+import { CamStandIn } from './companion/cam-standin.js';
 import { Wren, buildWrenPrimitive } from './companion/wren.js';
 import { createAdapter } from './companion/llm/index.js';
 import { CompanionMemory } from './companion/memory.js';
@@ -132,7 +133,8 @@ async function init() {
     loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
-  const [surfParts, stewPotP] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw)]); // Chunk C
+  const [surfParts, stewPotP, camScene, camHood] = await Promise.all([loadSurfaceParts(), loadParts('stewPot', raw), // Chunk C
+    loadScene('companion'), loadScene('companionHood')]); // polish: Cam's seated stand-in (provisional)
   const gmP = {}; // Chunk D: the Glowmere set
   await Promise.all(['water', 'rock1', 'rock2', 'cap1', 'cap2', 'cap3', 'reeds', 'lily1', 'lily2'].map(async (k) => {
     gmP[k] = await loadParts('gm' + k[0].toUpperCase() + k.slice(1), raw);
@@ -184,6 +186,7 @@ async function init() {
   const hoodUp = wrenHood?.root.getObjectByName('hood_up') || null;
   const wrenModel = wrenScene ? { ...wrenScene, hoodUp } : { root: buildWrenPrimitive().root, animations: [] };
   const wren = new Wren(scene, cave, wrenModel, spawn.clone().add(new THREE.Vector3(1.8, 0, -1.2)), budget);
+  const camStandIn = new CamStandIn(scene, camScene, camHood?.root.getObjectByName('hood_up') || null);
   // companions steer around placed pieces and stand on floors (Chunk B)
   puppy.colliders = colliders; wren.colliders = colliders;
   puppy.floorAt = wren.floorAt = (x, z) => build.heightAt(x, z);
@@ -977,8 +980,9 @@ async function init() {
     const anyLit = fires.anyLit;
     ambientLight.update(dt, player.pos, fires); // §8.1 distance-driven ambient
     puppy.update(dt, player, fires);
+    camStandIn.update(dt, player.seat);
     wren.update(dt, player, fires, chat.open, {
-      fog: fogState(), items: running ? items : null,
+      fog: fogState(), items: running ? items : null, nightSurface: dayNight.nightness * dayNight.b,
       onGather: (it) => {
         items.pickUp(it); player.inventory[it.kind] = (player.inventory[it.kind] || 0) + 1;
         hud.toast(`Wren hands you ${ITEM_INFO[it.kind].label}`, 1.8); audio.blip(600);
@@ -992,7 +996,7 @@ async function init() {
     const cp = camera.getWorldPosition(_camPos);
     dayNight.update(dt, { advance: running && !sleeping, camPos: cp, hemi, fog: scene.fog, scene, fireK: ambientLight.k, caveDensity: scene.fog.density, renderer });
     surface.update(dt, cp, camera); instCull.update(dt, camera);
-    glowmere.update(dt, player.pos, { lanternOn: wren.lightOn, sitting: !!player.seat && glowmere.weight(player.pos) > 0.3 });
+    glowmere.update(dt, player.pos, { lanternOn: Math.min(1, wren.lightOn), sitting: !!player.seat && glowmere.weight(player.pos) > 0.3 });
     { // fireflies: the grotto (25, cyan) or the clearing at dusk (40, warm); none in the caves
       const gw = glowmere.weight(player.pos);
       const dusk = timeWord(dayNight.tod) === 'dusk' && dayNight.b > 0.3;
@@ -1008,7 +1012,7 @@ async function init() {
   }
 
   Object.defineProperties(game, { warmth: { get: () => warmth, set: (v) => { warmth = v; } }, warmWord: { get: () => warmWord }, dayCount: { get: () => dayCount } });
-  Object.assign(game, { settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
+  Object.assign(game, { camStandIn, settings, glowmere, fireflies, sitDown, findSeat, benchSeat, dayNight, cooking, surface, instCull, eatStew, openSleep, doSleep, THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, worldState,
     audio, lore, reader, requests, saveNow, snapshot, digLog, keepsakesFound, openNote, throwStick, completeRequest, talkRequests,
     get paused() { return paused; }, setPaused, ready: true,
     start: () => begin() });

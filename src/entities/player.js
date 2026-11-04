@@ -51,13 +51,24 @@ export class Player {
       const e = this.sitE * this.sitE * (3 - 2 * this.sitE);
       const fx = -Math.sin(this.seat.yaw), fz = -Math.cos(this.seat.yaw);
       this.speed = 0; this.stillTime += dt; this.onGround = true;
-      // ease back, up and a little away from Wren, turning slightly toward her, so both fit in frame
-      const w = this.seat.wren?.pos; let sx = 0, sz = 0;
+      // Polish: frame Cam (the seated stand-in) and Wren together, roughly centred, with the water
+      // beyond: the camera eases to behind and above the middle of the pair, looking out past them.
+      const w = this.seat.wren?.pos, S = CONFIG.player.seatCam;
+      const mx = w ? (this.pos.x + w.x) / 2 : this.pos.x, mz = w ? (this.pos.z + w.z) / 2 : this.pos.z;
+      const ex = this.pos.x, ey = this.pos.y + 0.78, ez = this.pos.z; // seated eye (where the ease starts)
+      let sx = 0, sz = 0; // a little out to Cam's side for a three-quarter view of the pair
       if (w) { sx = this.pos.x - w.x; sz = this.pos.z - w.z; const l = Math.hypot(sx, sz) || 1; sx /= l; sz /= l; }
-      this.camera.position.set(this.pos.x - fx * 1.45 * e + sx * 0.4 * e, this.pos.y + 0.78 + 0.5 * e, this.pos.z - fz * 1.45 * e + sz * 0.4 * e);
+      const cx = mx - fx * S.back + sx * S.side, cy = this.pos.y + S.up, cz = mz - fz * S.back + sz * S.side;
+      this.camera.position.set(ex + (cx - ex) * e, ey + (cy - ey) * e, ez + (cz - ez) * e);
       this.cave.resolve(this.camera.position, 0.4);
-      const yawLook = Math.atan2(-(fx - sx * 0.22 * e), -(fz - sz * 0.22 * e)) + (this.yaw - this.seat.yaw);
-      this.camera.rotation.set(this.pitch, yawLook, 0);
+      // aim at a point out over the water just above the pair's heads
+      const tx = mx + fx * S.ahead, ty = this.pos.y + S.lookY, tz = mz + fz * S.ahead;
+      const dx = tx - this.camera.position.x, dy = ty - this.camera.position.y, dz = tz - this.camera.position.z;
+      const aimYaw = Math.atan2(-dx, -dz), aimPitch = Math.atan2(dy, Math.hypot(dx, dz));
+      let dYaw = aimYaw - this.seat.yaw; dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw));
+      const yawLook = this.seat.yaw + dYaw * e + (this.yaw - this.seat.yaw);
+      const pitchLook = -0.2 + (aimPitch + 0.2) * e + (this.pitch + 0.2);
+      this.camera.rotation.set(Math.max(-1.2, Math.min(1.2, pitchLook)), yawLook, 0);
       return;
     }
     this.sitE = Math.max(0, (this.sitE || 0) - dt * 3);
