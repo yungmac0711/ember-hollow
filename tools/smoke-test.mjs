@@ -798,6 +798,9 @@ const m2c = {};
   const tap = async (sel) => { const pt = await page.evaluate((sel) => { const e = document.querySelector(sel); if (!e || e.offsetParent === null) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
     if (!pt) return false; await touch('touchStart', [{ x: pt.x, y: pt.y, id: 14 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(250); return true; };
   const tapXY = async (pt) => { await touch('touchStart', [{ x: pt.x, y: pt.y, id: 15 }]); await page.waitForTimeout(60); await touch('touchEnd', []); await page.waitForTimeout(300); };
+  // a slow (swiftshader, high tier) frame can land between touchstart and touchend and push the press past the
+  // 260 ms tap window, so world taps are retried (up to 3 presses) until their effect shows
+  const tapUntil = async (pt, check) => { for (let i = 0; i < 3; i++) { await tapXY(pt); if (await page.evaluate(check)) return i + 1; } return 0; };
   // 0. a fresh journal + a clear spot for a fire in Lanternmouth
   const setup = await page.evaluate(() => {
     const g = __game, c = g.cave.chambers[0], inv = g.player.inventory;
@@ -825,7 +828,7 @@ const m2c = {};
     return { benchPlaced: !!r?.ok, pt: __screenOf(p, 0.6), cozyPre: g.cozy.score, tierPre: g.journal.cozyBest };
   }));
   // 2. stone axe at the bench (tap the bench on screen → Tools → Stone Axe)
-  if (ch1.pt?.hit === 'crafting_bench') await tapXY(ch1.pt);
+  if (ch1.pt?.hit === 'crafting_bench') ch1.benchPresses = await tapUntil(ch1.pt, () => __game.craftUI.isOpen);
   await tap('#craft-tabs [data-tab="tools"]'); ch1.axeTap = await tap('.craft-go[data-recipe="stone_axe"]');
   await tap('#craftui .panel-close');
   // 3. pet Biscuit by tapping him
@@ -848,7 +851,7 @@ const m2c = {};
     const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight, el = document.elementFromPoint(sx, sy);
     return { x: sx, y: sy, el: el?.id || el?.className || el?.tagName, ray: !!hit };
   });
-  await tapXY(pup);
+  pup.presses = await tapUntil(pup, () => __m2cPet > 0);
   await page.waitForTimeout(400);
   // 4. open the journal from the 📖 button: Ch1 page with checkmarks
   ch1.pup = { ...pup, pets: await page.evaluate(() => __m2cPet) }; ch1.journalBtn = await tap('#btn-journal');
@@ -875,10 +878,11 @@ const m2c = {};
   });
   await page.screenshot({ path: OUT + 'test-output/m2c-cozy-tierup.png' });
   // the recipe it unlocks: tap the bench → Cozy tab → Potted Glowcap is no longer locked
-  Object.assign(tier, await page.evaluate(async () => { const g = __game, p = g.build.find('crafting_bench'); __faceOn(p, 2.2); await new Promise((r) => setTimeout(r, 600)); return { pt: __screenOf(p, 0.6) }; }));
-  if (tier.pt?.hit === 'crafting_bench') await tapXY(tier.pt);
+  Object.assign(tier, await page.evaluate(async () => { const g = __game, p = g.build.find('crafting_bench'); __faceOn(p, 2.2);
+    const P = g.player; g.puppy.pos.set(P.pos.x + Math.sin(P.yaw) * 2.5, P.pos.y, P.pos.z + Math.cos(P.yaw) * 2.5); /* Biscuit (mid-zoomies) behind Cam, out of the tap's way */ await new Promise((r) => setTimeout(r, 600)); return { pt: __screenOf(p, 0.6) }; }));
+  if (tier.pt?.hit === 'crafting_bench') tier.benchPresses = await tapUntil(tier.pt, () => __game.craftUI.isOpen);
   await tap('#craft-tabs [data-tab="cozy"]');
-  Object.assign(tier, await page.evaluate(() => { const c = document.querySelector('.craft-card[data-id="potted_glowcap"]'); return { station: __game.craftUI.station, glowCard: !!c, glowLocked: !!c?.classList.contains('locked'), glowBtn: !!c?.querySelector('.craft-go') }; }));
+  Object.assign(tier, await page.evaluate(() => { const c = document.querySelector('.craft-card[data-id="potted_glowcap"]'); return { panelOpen: __game.craftUI.isOpen, station: __game.craftUI.station, glowCard: !!c, glowLocked: !!c?.classList.contains('locked'), glowBtn: !!c?.querySelector('.craft-go') }; }));
   await tap('#craftui .panel-close');
   tier.pass = tier.before.score < 15 && tier.before.best === 0 && !tier.before.lock.ok && tier.placed && tier.after.score >= 15 && tier.after.best >= 1 && tier.last?.tier === 'snug_nook'
     && /Snug Nook/.test(tier.toast) && !!tier.wren && !!tier.last?.cue && tier.saved >= 1 && tier.station === 'bench' && tier.glowCard && !tier.glowLocked && tier.glowBtn;
