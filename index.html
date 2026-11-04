@@ -80,7 +80,22 @@
     <div class="panel-body pause-body">
       <button class="tbtn" id="pause-resume">Resume</button>
       <button class="tbtn" id="pause-save">Save game</button>
+      <button class="tbtn" id="pause-settings">Settings</button>
       <p class="pause-note" id="pause-note"></p>
+    </div>
+  </div>
+
+  <div id="settings" class="panel hidden" role="dialog" aria-label="Settings">
+    <div class="panel-head"><span>Settings</span><button class="panel-close" id="settings-close" aria-label="Close">✕</button></div>
+    <div class="panel-body settings-body">
+      <label class="srow"><span>Master volume</span><input type="range" id="set-master" min="0" max="100" step="1" /><output id="set-master-v"></output></label>
+      <label class="srow"><span>Music</span><input type="range" id="set-music" min="0" max="100" step="1" /><output id="set-music-v"></output></label>
+      <label class="srow"><span>Effects</span><input type="range" id="set-effects" min="0" max="100" step="1" /><output id="set-effects-v"></output></label>
+      <label class="srow"><span>Look sensitivity</span><input type="range" id="set-sens" min="30" max="250" step="5" /><output id="set-sens-v"></output></label>
+      <div class="srow"><span>Invert look Y</span><button class="sbtn" id="set-invert" aria-pressed="false">Off</button></div>
+      <div class="srow"><span>Graphics</span><div class="seg" id="set-tier"><button class="sbtn" data-tier="auto">Auto</button><button class="sbtn" data-tier="low">Low</button><button class="sbtn" data-tier="high">High</button></div></div>
+      <p class="pause-note" id="set-note"></p>
+      <button class="tbtn hidden" id="set-reload">Restart to apply</button>
     </div>
   </div>
 
@@ -120,7 +135,7 @@
       <div class="title-menu hidden" id="title-menu">
         <button class="tbtn" id="title-continue" hidden></button>
         <button class="tbtn" id="title-new"></button>
-        <button class="tbtn dim" id="title-settings" disabled></button>
+        <button class="tbtn dim" id="title-settings"></button>
       </div>
       <div class="title-confirm hidden" id="title-confirm">
         <p>Start a new game? Your current save will be replaced. (Wren will still remember you.)</p>

@@ -72,8 +72,8 @@ export class Input {
     // Mouse look with pointer lock
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this._canvas || !this.enabled) return;
-      this.look.x += e.movementX * CONFIG.player.lookMouse;
-      this.look.y += e.movementY * CONFIG.player.lookMouse;
+      this.look.x += e.movementX * CONFIG.player.lookMouse * (this.sens ?? 1);
+      this.look.y += e.movementY * CONFIG.player.lookMouse * (this.sens ?? 1);
     });
 
     // Belt-and-braces against scroll / zoom / pull-to-refresh / iOS gesture zoom
@@ -139,8 +139,8 @@ export class Input {
       this._lookPtr.lx = e.clientX; this._lookPtr.ly = e.clientY;
       this._lookPtr.moved = Math.max(this._lookPtr.moved, Math.hypot(e.clientX - this._lookPtr.sx, e.clientY - this._lookPtr.sy));
       if (this.enabled) {
-        this.look.x += dx * CONFIG.player.lookTouch;
-        this.look.y += dy * CONFIG.player.lookTouch;
+        this.look.x += dx * CONFIG.player.lookTouch * (this.sens ?? 1);
+        this.look.y += dy * CONFIG.player.lookTouch * (this.sens ?? 1);
       }
     }
   }

@@ -177,3 +177,14 @@ body.on-title #hud > *:not(#fps), body.on-title #hotbar, body.on-title #palette 
 #fade.on { opacity: 1; pointer-events: auto; }
 #sleep { z-index: 7; width: min(340px, calc(100vw - 40px)); }
 body.on-title #warmth { visibility: hidden; }
+/* Chunk D: settings (title + pause) */
+#settings { z-index: 12; width: min(460px, calc(100vw - 40px - var(--sal) - var(--sar))); }
+.settings-body { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 16px; }
+.srow { display: grid; grid-template-columns: 9.5em 1fr 3em; align-items: center; gap: 10px; min-height: 40px; font-size: 15px; }
+.srow > .seg, .srow > .sbtn { grid-column: 2 / 4; justify-self: start; }
+.srow output { text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
+.srow input[type=range] { width: 100%; height: 34px; accent-color: var(--amber); touch-action: none; }
+.seg { display: flex; gap: 6px; }
+.sbtn { min-width: 64px; min-height: 38px; padding: 6px 12px; border-radius: 10px; border: 1.5px solid rgba(255,190,120,0.45); background: rgba(34,24,16,0.7); color: #ffe6c4; font: 700 14px/1 inherit; font-family: inherit; touch-action: manipulation; }
+.sbtn.on, .sbtn[aria-pressed=true] { background: linear-gradient(180deg, rgba(224,138,46,0.92), rgba(170,92,30,0.92)); border-color: #ffc27a; color: #fff; }
+#set-reload { align-self: center; }
