@@ -77,9 +77,27 @@ await shot('m1-clearing-night.png', () => {
 await shot('m1-night-rain.png', () => {
   const g = __game, cl = g.cave.clearing, h = __h;
   g.dayNight.tod = 960; g.dayNight.forceRain = true; g.dayNight.weather = 'rain'; g.dayNight.rainK = 1; g.dayNight.rainL = 1;
-  h.stand(cl.x + 9, cl.z - 6, cl.x + 4, cl.z - 1, -0.12);
-  h.friends(cl.x + 6.6, cl.z - 3.8, cl.x + 7.4, cl.z - 4.6);
+  // the §8.3 floor applies beyond fire radius + 6 m, and the lit campfire + hearth cover the whole clearing,
+  // so this staged shot lets the fires burn out (restored afterwards): only Wren's lantern + the rain night floor
+  window.__fuel = g.fires.fires.map((f) => f.fuel); for (const f of g.fires.fires) f.fuel = 0;
+  // a spot with clear ground: Cam on the rim side looking in, no tree within 3 m of Cam, Wren or the line between
+  const trees = [...g.harvest.nodes.filter((n) => n.type === 'tree' && n.alive).map((n) => n.pos), ...(g.surface.trees || []).map((t) => t.pos || t)].filter((p) => p && Number.isFinite(p.x));
+  const segD = (p, ax, az, bx, bz) => { const vx = bx - ax, vz = bz - az, t = Math.max(0, Math.min(1, ((p.x - ax) * vx + (p.z - az) * vz) / (vx * vx + vz * vz))); return Math.hypot(p.x - ax - vx * t, p.z - az - vz * t); };
+  let best = null;
+  for (let a = 0; a < 6.283; a += 0.15) {
+    const px = cl.x + Math.cos(a) * (cl.r - 3), pz = cl.z + Math.sin(a) * (cl.r - 3), tx = cl.x + Math.cos(a) * (cl.r - 8.5), tz = cl.z + Math.sin(a) * (cl.r - 8.5);
+    const d = Math.min(99, ...trees.map((p) => segD(p, px, pz, tx + (tx - px) * 0.6, tz + (tz - pz) * 0.6)));
+    if (!best || d > best.d) best = { px, pz, tx, tz, d };
+  }
+  window.__nrBest = best;
+  document.getElementById('subtitle').style.visibility = 'hidden'; // ambient rain line would cover Biscuit
+  const { px, pz, tx, tz } = best;
+  h.stand(px, pz, tx, tz, -0.16);
+  const sx = -(tz - pz) / 5.5, sz = (tx - px) / 5.5; // sideways unit-ish
+  const hold = () => { h.friends(tx + sx * 0.6, tz + sz * 0.6, tx - sx * 0.7 + (px - tx) * 0.12, tz - sz * 0.7 + (pz - tz) * 0.12); g.wren.heading = Math.atan2(px - tx, pz - tz); };
+  hold(); window.__hold = setInterval(hold, 50);
 }, 4000);
+console.log('night-rain', await page.evaluate(() => { clearInterval(window.__hold); const g = __game; document.getElementById('subtitle').style.visibility = ''; setTimeout(() => g.fires.fires.forEach((f, i) => { f.fuel = window.__fuel[i]; }), 0); return JSON.stringify({ best: window.__nrBest, r: g.cave.clearing.r, fireK: +g.ambientLight.k.toFixed(2), hemi: +g.hemi.intensity.toFixed(2), ground: g.hemi.groundColor.getHexString(), lantern: +g.wren.emitter.intensity.toFixed(2) }); }));
 await page.evaluate(() => { const d = __game.dayNight; d.forceRain = false; d.weather = 'clear'; d.rainK = 0; d.rainL = 0; });
 
 await page.evaluate((v) => { window.__DYAW = v; }, +(process.env.DYAW || 0.35));
@@ -97,9 +115,11 @@ await shot('m1-cozy-sit.png', () => { const DYAW = +(window.__DYAW || 0);
   const g = __game, s = g.glowmere.seat, h = __h;
   h.stand(s.stand.x, s.stand.z, s.pos.x, s.pos.z);
   g.wren.pos.set(s.wren.pos.x, s.wren.pos.y, s.wren.pos.z);
-  g.puppy.pos.set(s.stand.x + 0.4, g.cave.floorAt(s.stand.x + 0.4, s.stand.z), s.stand.z);
+  // Biscuit at their feet, just in front of the pair
+  const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw), bx = (s.pos.x + s.wren.pos.x) / 2 + fx * 1.1, bz = (s.pos.z + s.wren.pos.z) / 2 + fz * 1.1;
+  g.puppy.pos.set(bx, g.cave.floorAt(bx, bz), bz);
   g.sitDown(s);
-  setTimeout(() => { g.player.yaw += DYAW; }, 1500); // turn the view a touch toward Wren
+  if (DYAW) setTimeout(() => { g.player.yaw += DYAW; }, 1500); // optional extra turn (the seated camera now frames the pair itself)
 }, 6000);
 console.log(errors.length ? 'errors: ' + errors.join(' | ') : 'no console errors');
 await browser.close();
