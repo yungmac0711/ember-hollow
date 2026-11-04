@@ -24,6 +24,8 @@ export function treeVariants(parts) {
   return out;
 }
 
+const _fr = new THREE.Frustum(), _sph = new THREE.Sphere();
+
 export class Surface {
   constructor(scene, cave, seed, parts, { low = false } = {}) {
     const rng = mulberry32((seed * 53 + 17) >>> 0);
@@ -100,9 +102,20 @@ export class Surface {
   }
 
   /** Whole-system cull: the clearing's vegetation only renders from the mouth tunnel outwards. */
-  update(dt, camPos) {
+  // Inside the tunnel (> 4 m in) it also needs the mouth itself in the camera frustum, so looking
+  // back into Lanternmouth doesn't draw the clearing behind the rock.
+  update(dt, camPos, camera) {
     if ((this._cull += dt) < 0.2) return; this._cull = 0;
-    const vis = this.cave.depthIntoCave(camPos.x, camPos.z) < 20; this.visible = vis;
+    const depth = this.cave.depthIntoCave(camPos.x, camPos.z);
+    let vis = depth < 20;
+    if (vis && depth > 4 && camera) {
+      const c = this.cave.clearing, a = Math.atan2(-c.z, -c.x);
+      camera.updateMatrixWorld();
+      _fr.setFromProjectionMatrix(_m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      _sph.center.set(c.x + Math.cos(a) * (c.r || 12.5), this.cave.floorAt(c.x + Math.cos(a) * (c.r || 12.5), c.z + Math.sin(a) * (c.r || 12.5)) + 1.5, c.z + Math.sin(a) * (c.r || 12.5)); _sph.radius = 3;
+      vis = _fr.intersectsSphere(_sph);
+    }
+    this.visible = vis;
     for (const m of this.meshes) m.visible = vis;
     // per-instance frustum/distance culling: main.js registers this.meshes with the InstanceCuller
   }

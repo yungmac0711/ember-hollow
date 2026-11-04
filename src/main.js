@@ -931,7 +931,8 @@ async function init() {
     // Chunk C: surface day/night + weather over the §8.1 cave ambient (blend by depth into the cave)
     const cp = camera.getWorldPosition(_camPos);
     dayNight.update(dt, { advance: running && !sleeping, camPos: cp, hemi, fog: scene.fog, scene, fireK: ambientLight.k, caveDensity: scene.fog.density, renderer });
-    surface.update(dt, cp); instCull.update(dt, camera);
+    surface.update(dt, cp, camera); instCull.update(dt, camera);
+    if (surface.visible === false) dayNight.sky.visible = false;
     for (const v of ['pine', 'round', 'birch']) if (harvest.treeMeshes[v]) harvest.treeMeshes[v].visible = surface.visible !== false; // surface trees off deep in the cave
     if (!running) cooking.update(0, cp);
     audio.rain?.(dayNight.rainK * dayNight.b, build.underRoof(player.pos));
