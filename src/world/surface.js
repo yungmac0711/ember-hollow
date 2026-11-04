@@ -102,7 +102,7 @@ export class Surface {
   /** Whole-system cull: the clearing's vegetation only renders from the mouth tunnel outwards. */
   update(dt, camPos) {
     if ((this._cull += dt) < 0.2) return; this._cull = 0;
-    const vis = this.cave.depthIntoCave(camPos.x, camPos.z) < 20;
+    const vis = this.cave.depthIntoCave(camPos.x, camPos.z) < 20; this.visible = vis;
     for (const m of this.meshes) m.visible = vis;
     // per-instance frustum/distance culling: main.js registers this.meshes with the InstanceCuller
   }
