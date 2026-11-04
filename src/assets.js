@@ -4,6 +4,7 @@
 // later (copy them to game/assets/models/ and set the URL in config.js) without touching gameplay code.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 let _loader = null;
 async function gltfLoader() {
@@ -137,4 +138,26 @@ export async function loadScene(name, { height } = {}) {
     console.warn(`[assets] ${name}: failed to load ${url}`, err);
     return null;
   }
+}
+
+/**
+ * Chunk C: bake a multi-material static GLB (loadParts output) into ONE vertex-coloured geometry
+ * (1 draw call per InstancedMesh). Emissive parts are returned separately so they can keep their own
+ * glow material (glow comes only from emissive materials). `filter(part)` selects which parts to bake.
+ * @returns {{geometry: THREE.BufferGeometry|null, glow: Array<{geometry, material}>}}
+ */
+export function bakeVertexColors(parts, filter = () => true) {
+  if (!parts) return { geometry: null, glow: [] };
+  const plain = [], glow = [];
+  for (const p of parts) {
+    if (!filter(p)) continue;
+    if (p.material.emissive && p.material.emissive.getHex()) { glow.push(p); continue; }
+    const g = p.geometry.index ? p.geometry.toNonIndexed() : p.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    const n = g.attributes.position.count, a = new Float32Array(n * 3), c = p.material.color;
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    plain.push(g);
+  }
+  return { geometry: plain.length ? mergeGeometries(plain) : null, glow };
 }

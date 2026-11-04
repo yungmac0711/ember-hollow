@@ -71,6 +71,11 @@ export const CONFIG = {
     tree: { count: 10, seconds: 1.6, yield: { wood: 3 }, respawn: 240, reach: 2.6 },
     rock: { count: 14, seconds: 1.3, yield: { stone: 2 }, flintChance: 0.4, respawn: 200, reach: 2.4 },
   },
+  // Chunk C: warmth (0..100, never harmful — cold only brings a cozy nudge), cooking, weather
+  warmth: { start: 80, nearFire: 3, shelter: 1.5, drift: 0.12, nightSurface: 0.3, rainSurface: 0.35, both: 0.5,
+    cold: 25, warm: 70, stew: 45, stewHold: 120 },
+  cooking: { ingredients: 2, seconds: 15 },
+  weather: { rainOpacity: 0.35 },
   build: { grid: 2, wallHeight: 2.1, reach: 2.2 }, // piece costs live in src/build/pieces.js
   playerName: 'Cam',
   companion: {
@@ -141,6 +146,16 @@ export const CONFIG = {
       // M1 gathering
       rockB: 'assets/models/cave-rock/rock-b.glb',
       mushroomRed: 'assets/models/nature/mushroom_red.glb',
+      // Chunk C: surface clearing (art/assets/surface, metres, origin at base) + cooking
+      treePine: 'assets/models/surface/tree_pine.glb',
+      treeRound: 'assets/models/surface/tree_round.glb',
+      treeBirch: 'assets/models/surface/tree_birch.glb',
+      bush1: 'assets/models/surface/bush_1.glb',
+      bushGlowberry: 'assets/models/surface/bush_glowberry.glb',
+      grass1: 'assets/models/surface/grass_tuft_1.glb',
+      grass2: 'assets/models/surface/grass_tuft_2.glb',
+      grass3: 'assets/models/surface/grass_tuft_3.glb',
+      stewPot: 'assets/models/props/stew-pot.glb',
       // Custom Style-A props (art director): crystals, moss, torches — see src/world/dressing.js
       crystal1: 'assets/models/crystals/crystal-cluster-1.glb',
       crystal2: 'assets/models/crystals/crystal-cluster-2.glb',

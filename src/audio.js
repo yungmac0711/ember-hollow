@@ -46,6 +46,22 @@ export class GameAudio {
     this._popBuf = c.createBuffer(1, Math.floor(c.sampleRate * 0.03), c.sampleRate);
     const d = this._popBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    // Chunk C: rain hiss (white noise → band-pass), muffled by a lowpass when under a roof
+    const wn = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), wd = wn.getChannelData(0);
+    for (let i = 0; i < wd.length; i++) wd[i] = Math.random() * 2 - 1;
+    const rs = c.createBufferSource(); rs.buffer = wn; rs.loop = true;
+    this.rainBP = c.createBiquadFilter(); this.rainBP.type = 'bandpass'; this.rainBP.frequency.value = 2400; this.rainBP.Q.value = 0.5;
+    this.rainLP = c.createBiquadFilter(); this.rainLP.type = 'lowpass'; this.rainLP.frequency.value = 9000;
+    this.rainGain = c.createGain(); this.rainGain.gain.value = 0;
+    rs.connect(this.rainBP).connect(this.rainLP).connect(this.rainGain).connect(this.master); rs.start();
+  }
+
+  /** Rain loudness 0..1; `roof` muffles it to a soft drum. */
+  rain(level, roof) {
+    if (!this.unlocked || !this.rainGain) return;
+    const t = this.ctx.currentTime;
+    this.rainGain.gain.setTargetAtTime(level * (roof ? 0.22 : 0.12), t, 0.5);
+    this.rainLP.frequency.setTargetAtTime(roof ? 900 : 9000, t, 0.4);
   }
 
   /** @param level 0..1 loudness of the nearest fire (strength × proximity) */

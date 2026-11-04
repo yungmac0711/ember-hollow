@@ -22,6 +22,14 @@ export class LightBudget {
   constructor(scene, maxLights = 2) {
     this.emitters = [];
     this.slots = [];
+    // Chunk C (§8.2): the sun/moon is a no-shadow DirectionalLight that is ALWAYS in the scene (fixed
+    // light count = no shader recompiles) but only shines while it holds one of the pool's slots.
+    // DayNight sets sunTarget (phase intensity × surface blend) and isMoon each frame.
+    this.sun = new THREE.DirectionalLight(0xffffff, 0);
+    this.sun.castShadow = false;
+    this.sun.position.set(0, 10, 0); this.sun.target.position.set(0, 0, 0);
+    scene.add(this.sun, this.sun.target);
+    this.sunTarget = 0; this.isMoon = false; this.sunFade = 0; this.moonDropped = 0;
     for (let i = 0; i < maxLights; i++) {
       const light = new THREE.PointLight(0xffffff, 0, 1, 2);
       light.position.set(0, -100, 0);
@@ -37,7 +45,8 @@ export class LightBudget {
   }
 
   /** Number of slots currently contributing light (for the perf report). */
-  get activeCount() { return this.slots.filter((s) => s.emitter && s.light.intensity > 0.01).length; }
+  get activeCount() { return this.slots.filter((s) => s.emitter && s.light.intensity > 0.01).length + (this.sun.intensity > 0.01 ? 1 : 0); }
+  get pointCount() { return this.slots.filter((s) => s.emitter && s.light.intensity > 0.01).length; }
 
   update(dt, viewPos) {
     // score: priority only counts while the camera is inside (or near) the light's own range —
@@ -49,7 +58,15 @@ export class LightBudget {
       if (d > reach) { e.score = 0; continue; }
       e.score = (d < e.distance + 2 ? e.priority * 10 : 0) + (1 - d / reach) * 5;
     }
-    const want = this.emitters.filter((e) => e.score > 0).sort((a, b) => b.score - a.score).slice(0, this.slots.length);
+    const ranked = this.emitters.filter((e) => e.score > 0).sort((a, b) => b.score - a.score);
+    // Sun/moon slot. Drop-the-moon rule (§8.2): at night, if a campfire plus the rest want every slot,
+    // the moon gives its slot up (DayNight raises the night hemi instead). The daytime sun always wins.
+    const inRange = ranked.filter((e) => e.score >= 10);
+    const dropMoon = this.isMoon && inRange.length >= this.slots.length && inRange.some((e) => e.priority >= 3);
+    const sunWants = this.sunTarget > 0.01 && !dropMoon;
+    this.moonDropped += ((this.isMoon && dropMoon && this.sunTarget > 0.01 ? 1 : 0) - this.moonDropped) * Math.min(1, dt * 2);
+    const nPoint = this.slots.length - (sunWants ? 1 : 0);
+    const want = ranked.slice(0, nPoint);
     // release slots whose emitter fell out of the top-N (fade out first)
     for (const s of this.slots) {
       if (s.emitter && !want.includes(s.emitter)) {
@@ -61,8 +78,14 @@ export class LightBudget {
     for (const e of want) {
       if (this.slots.some((s) => s.emitter === e)) continue;
       const free = this.slots.find((s) => !s.emitter);
-      if (free) { free.emitter = e; free.fade = 0; }
+      const cap = this.slots.length - (this.sun.intensity > 0.01 ? 1 : 0); // wait for the moon to fade out
+      if (free && this.slots.filter((s) => s.emitter).length < cap) { free.emitter = e; free.fade = 0; }
     }
+    // the sun only fades in once a point slot has actually been handed back (never 3 lights at once)
+    const busy = this.slots.filter((s) => s.emitter).length;
+    const canSun = sunWants && busy <= nPoint;
+    this.sunFade = canSun ? Math.min(1, this.sunFade + dt * 1.5) : Math.max(0, this.sunFade - dt * 3);
+    this.sun.intensity = this.sunTarget * this.sunFade * this.sunFade * (3 - 2 * this.sunFade);
     for (const s of this.slots) {
       const e = s.emitter;
       if (!e) { s.light.intensity = 0; continue; }

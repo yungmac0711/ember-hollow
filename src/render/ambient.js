@@ -21,8 +21,9 @@ export class AmbientController {
     this._sky = new THREE.Color(); this._ground = new THREE.Color(); this._fog = new THREE.Color();
     this.k = 1;
     // start at the exploration values (no fire yet)
-    hemi.intensity = h.intensityFar; hemi.color.copy(this.c.sky[1]); hemi.groundColor.copy(this.c.ground[1]);
-    fog.color.copy(this.c.fog[1]);
+    // own smoothed state (Chunk C: DayNight blends the surface on top of these every frame)
+    this.cur = { intensity: h.intensityFar, sky: this.c.sky[1].clone(), ground: this.c.ground[1].clone(), fog: this.c.fog[1].clone() };
+    this._apply();
   }
 
   update(dt, playerPos, fires) {
@@ -47,9 +48,13 @@ export class AmbientController {
     }
     const a = 1 - Math.exp(-h.smoothing * dt);
     const target = THREE.MathUtils.lerp(h.intensity, h.intensityFar, k);
-    this.hemi.intensity += (target - this.hemi.intensity) * a;
-    this.hemi.color.lerp(this._sky, a);
-    this.hemi.groundColor.lerp(this._ground, a);
-    this.fog.color.lerp(this._fog, a);
+    const c = this.cur;
+    c.intensity += (target - c.intensity) * a;
+    c.sky.lerp(this._sky, a); c.ground.lerp(this._ground, a); c.fog.lerp(this._fog, a);
+    this._apply();
+  }
+  _apply() {
+    const c = this.cur;
+    this.hemi.intensity = c.intensity; this.hemi.color.copy(c.sky); this.hemi.groundColor.copy(c.ground); this.fog.color.copy(c.fog);
   }
 }
