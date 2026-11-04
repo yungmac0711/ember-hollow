@@ -12,6 +12,7 @@ export class Input {
     this.look = { x: 0, y: 0 };      // accumulated radians since last consume
     this.jumpHeld = false;
     this.pressed = new Set();        // edge-triggered actions: 'interact' | 'build' | 'chat' | 'jump'
+    this.held = new Set();           // currently held buttons ('interact' for hold-to-gather)
     this.taps = [];                  // [{x,y}] screen taps on the look side (for raycast picking)
     this.usingTouch = false;
 
@@ -33,10 +34,10 @@ export class Input {
         e.preventDefault(); e.stopPropagation();
         el.setPointerCapture?.(e.pointerId);
         el.classList.add('active');
-        this.pressed.add(name);
+        this.pressed.add(name); this.held.add(name);
         if (name === 'jump') this.jumpHeld = true;
       });
-      const release = (e) => { el.classList.remove('active'); if (name === 'jump') this.jumpHeld = false; };
+      const release = (e) => { el.classList.remove('active'); this.held.delete(name); if (name === 'jump') this.jumpHeld = false; };
       el.addEventListener('pointerup', release);
       el.addEventListener('pointercancel', release);
       el.addEventListener('lostpointercapture', release);
@@ -49,15 +50,22 @@ export class Input {
       this._keys.add(e.code);
       if (e.repeat) return;
       if (e.code === 'Space') { this.pressed.add('jump'); this.jumpHeld = true; e.preventDefault(); }
-      if (e.code === 'KeyE' || e.code === 'KeyF') this.pressed.add('interact');
+      if (e.code === 'KeyE' || e.code === 'KeyF') { this.pressed.add('interact'); this.held.add('interact'); }
       if (e.code === 'KeyB') this.pressed.add('build');
+      if (e.code === 'KeyR') this.pressed.add('rotate');
+      if (e.code === 'KeyX') this.pressed.add('remove');
+      if (e.code === 'KeyI' || e.code === 'Tab') { this.pressed.add('bag'); e.preventDefault(); }
+      if (/^Digit[1-9]$/.test(e.code)) this.pressed.add('slot' + e.code.slice(5));
+      if (e.code === 'Digit0') this.pressed.add('slot10');
       if (e.code === 'KeyT' || e.code === 'Enter') { this.pressed.add('chat'); e.preventDefault(); }
     });
     window.addEventListener('keyup', (e) => {
       this._keys.delete(e.code);
       if (e.code === 'Space') this.jumpHeld = false;
+      if (e.code === 'KeyE' || e.code === 'KeyF') this.held.delete('interact');
     });
-    window.addEventListener('blur', () => { this._keys.clear(); this.jumpHeld = false; });
+    window.addEventListener('mouseup', (e) => { if (e.button === 0) this.held.delete('interact'); });
+    window.addEventListener('blur', () => { this._keys.clear(); this.held.clear(); this.jumpHeld = false; });
 
     // Mouse look with pointer lock
     document.addEventListener('mousemove', (e) => {
@@ -67,7 +75,7 @@ export class Input {
     });
 
     // Belt-and-braces against scroll / zoom / pull-to-refresh / iOS gesture zoom
-    const stop = (e) => { if (!this._typing() && !e.target.closest?.('.chat-log')) e.preventDefault(); };
+    const stop = (e) => { if (!this._typing() && !e.target.closest?.('.chat-log, .scroll, .panel-body')) e.preventDefault(); };
     document.addEventListener('touchmove', stop, { passive: false });
     document.addEventListener('gesturestart', (e) => e.preventDefault());
     document.addEventListener('dblclick', (e) => e.preventDefault());
@@ -88,7 +96,7 @@ export class Input {
     if (!this.enabled) return;
     if (e.pointerType === 'mouse') {
       if (document.pointerLockElement !== this._canvas) this.requestPointerLock();
-      else if (e.button === 0) this.pressed.add('interact');
+      else if (e.button === 0) { this.pressed.add('interact'); this.held.add('interact'); }
       return;
     }
     this.usingTouch = true;
@@ -145,6 +153,13 @@ export class Input {
     }
   }
 
+  /** A look-side finger held still (tap-hold on a target): {x, y, ms} or null. */
+  get lookHold() {
+    const lp = this._lookPtr;
+    if (!lp || lp.moved >= TAP_PX) return null;
+    return { x: lp.sx, y: lp.sy, ms: performance.now() - lp.t0 };
+  }
+
   _setKnob(dx, dy) { this._knob.style.transform = `translate(${dx}px, ${dy}px)`; }
 
   /** Call once per frame: merges keyboard into move vector. */
@@ -168,6 +183,6 @@ export class Input {
 
   reset() {
     this._joy = null; this._lookPtr = null; this.move.x = this.move.y = 0; this.jumpHeld = false;
-    this._keys.clear(); this.look.x = this.look.y = 0; this._joyEl.classList.add('hidden');
+    this._keys.clear(); this.held.clear(); this.look.x = this.look.y = 0; this._joyEl.classList.add('hidden');
   }
 }

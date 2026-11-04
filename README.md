@@ -1,4 +1,4 @@
-# Ember Hollow — M0 prototype
+# Ember Hollow — M0 prototype + M1 chunk A (gathering & building)
 
 A cozy, dark-fantasy cave-survival game for the phone. You are **Cam**. You explore a cave, gather
 wood, stone and flint, and light a campfire to push the fog back. **Wren** keeps you company and
@@ -37,10 +37,13 @@ URL flags:
 | Move | Left thumb: the floating joystick appears where you touch | WASD / arrows |
 | Look | Drag anywhere on the right side | Mouse (click to lock the pointer) |
 | Jump | ⤒ button | Space |
-| Use / gather / add wood / light fire / pet / talk | The big context button (its label shows the action) | E / F / left click |
+| Use / pick up / add wood / light fire / pet / talk | The big context button (its label shows the action) | E / F / left click |
+| Chop a tree / break a rock | **Hold** Use while aiming at it, or press and hold on it (progress ring) | hold E / F / left mouse |
+| Open a door / chest | Use, or tap it | E |
+| Hotbar / pack | Bottom bar; 🎒 opens the pack | 1–6, I / Tab |
 | Talk to Wren | Tap Wren, or the 💬 button | T / Enter |
 | Pet Biscuit | Tap Biscuit when he's close | E when close |
-| Build mode (floor tiles) | 🔨 to toggle, then Use to place | B, then E |
+| Build mode | 🔨 toggles; pick a piece in the bar, Use to place, ⟳ rotate, 🗑 remove (full refund) | B, 1–0, E, R, X |
 
 **Goal:** collect **4 wood + 1 flint** and light a campfire in a clear spot. Flint shows up mostly on
 *Flintseam Ridge*, and one piece is in the starting chamber. The fire burns down (75 s per piece of
@@ -48,8 +51,17 @@ wood, up to 8 stacked), so keep feeding it. When it dies the fog slowly thickens
 is never dangerous, just colder and moodier. Once the fire is lit, Biscuit trots over and sits by it,
 and Wren sits down beside it to warm her hands.
 
-A floor tile costs 2 wood + 1 stone and snaps to a 2 m grid. Walls, roof and removal are planned for
-M1.
+**Gathering (M1):** hold to chop root trees (3 wood) and break rocks (2 stone, sometimes flint on
+Flintseam Ridge). Mushrooms, glowcaps and crystal shards are pickups. Everything respawns slowly, and
+only while you are more than 7 m away.
+
+**Building (M1):** pieces are 2 m wide on a grid with cell centres on even metres. Floors fill cells,
+walls / window walls / doors sit on cell edges (front faces away from you, ⟳ flips), roofs need a wall
+under one edge, and hearth / bed roll / lantern / table / chest take one per cell. The ghost is green
+when it fits and red (with a reason) when it doesn't. Costs: floor 2 wood + 1 stone, wall 3 wood,
+window 3 wood + 1 stone, door 4 wood, roof 3 wood + 1 stone, hearth 2 wood + 6 stone, bed roll 2 wood,
+lantern 1 wood + 2 stone, table 4 wood, chest 5 wood + 1 stone. The hearth is a real campfire (feed it
+wood to light it). The chest has its own storage panel; tap a stack to move it.
 
 ## What's in M0
 
@@ -210,21 +222,23 @@ game/
 ├── css/style.css         # HUD, MCPE-style buttons, chat panel, safe areas, no-zoom/bounce
 ├── icons/                # 192/512/maskable/apple-touch/favicon (tools/make-icons.py)
 ├── vendor/               # three.module.min.js r170 + GLTFLoader + BufferGeometryUtils (MIT)
-├── assets/models/        # GLBs actually used: art-director characters/dog/crystals/moss/torches + Kenney CC0 props
+├── assets/models/        # GLBs actually used (see assets/models/README.md)
+├── assets/icons/         # 128 px item/piece icons (hotbar, pack, palette)
 ├── src/
 │   ├── main.js           # bootstrap, game loop, interactions, triggers, session handling
 │   ├── config.js         # every tunable: render/fog/lights, player, fire, costs, names, LLM, asset paths
 │   ├── assets.js         # GLB loader with primitive fallback (drop-in art)
 │   ├── audio.js          # WebAudio crackle + blips, unlocked on first tap
 │   ├── render/           # lights.js (LightBudget + emitters), character-materials.js (lift + rim)
-│   ├── world/            # cave.js (SDF cave, meshes, collision), decor.js, dressing.js, noise.js
+│   ├── render/ambient.js # firelight-aware hemisphere/fog colours + zone tints
+│   ├── world/            # cave.js (SDF cave, meshes, collision), colliders.js (piece colliders), decor.js, dressing.js, noise.js
 │   ├── input/input.js    # multitouch joystick/look/buttons/taps + keyboard/pointer-lock
-│   ├── entities/         # player.js, items.js, puppy.js + biscuit-rig.js + biscuit-poses.js (Biscuit)
+│   ├── entities/         # player.js, items.js, harvest.js (trees/rocks), puppy.js + biscuit-rig.js + biscuit-poses.js (Biscuit)
 │   ├── fire/campfire.js  # campfires, fuel, flames/embers, flickering light emitters
-│   ├── build/shelter.js  # snap-grid build mode (floor tiles)
+│   ├── build/            # pieces.js (catalogue + costs), shelter.js (snap, ghost, instancing, doors, chests)
 │   ├── companion/        # wren.js, wren-anim.js, chat-ui.js, ambient.js, memory.js, context.js,
 │   │   │                 # story-data.js (GENERATED from ../story), llm/ adapters
-│   └── ui/hud.js         # inventory, hints, fuel bar, subtitles, toasts, FPS counter
+│   └── ui/               # hud.js (hints, fuel bar, subtitles, toasts, FPS), inventory-ui.js (hotbar, pack, chest, palette, ring)
 ├── tools/                # sync-story.mjs, build-sw.mjs, make-icons.py, smoke-test.mjs, screenshots.mjs,
 │                         # extract-biscuit-poses.mjs, pose-preview.html (dev pose viewer)
 ├── screenshots/          # art-review phone screenshots (1688×780), not precached
@@ -262,6 +276,9 @@ The test emulates an iPhone in landscape (844×390, touch). It:
 - gathers items, lights and refuels a fire
 - checks that Biscuit sits and Wren warms up by the fire and that the fog thins
 - chats with Wren and checks the memory key and the context block
+- M1: hold-to-chop with Use, press-and-hold a rock by touch, the new pickups, placing a floor / wall /
+  roof / door / chest, rotate, door open (−100°, leaf collider off) and close, chest store and take,
+  remove with full refund, and a 60-piece perf test (`m1.perf60`)
 - confirms the service worker activates
 
 Screenshots go to `docs/screenshot.png` and `docs/test-output/`. The perf block reports draw calls,

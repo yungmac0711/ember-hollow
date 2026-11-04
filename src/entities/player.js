@@ -14,7 +14,7 @@ export class Player {
     this.onGround = false;
     this.speed = 0;                   // current horizontal speed (for puppy logic)
     this.stillTime = 0;
-    this.inventory = { wood: 0, stone: 0, flint: 0 };
+    this.inventory = { wood: 0, stone: 0, flint: 0, mushroom: 0, glowcap: 0, shard: 0 };
     this._bob = 0;
     this._s = {};
     this.camera.rotation.order = 'YXZ';
@@ -47,6 +47,7 @@ export class Player {
     for (let i = 0; i < steps; i++) {
       this.pos.x += dx / steps; this.pos.z += dz / steps;
       this.cave.resolve(this.pos, minF);
+      this.colliders?.resolve(this.pos, P.radius);
     }
     // keep velocity consistent with where we actually went (wall sliding)
     if (dt > 0) { this.vel.x = (this.pos.x - before.x) / dt; this.vel.z = (this.pos.z - before.z) / dt; }

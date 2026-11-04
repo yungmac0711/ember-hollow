@@ -17,12 +17,22 @@ export const CONFIG = {
     background: 0x0e1117,
     fogColor: 0x3a4656,
     fogWarm: 0.04,   // fog density when standing in a well-fed fire's light
-    fogCold: 0.075,  // fog density far from fire / when the fire has died (the Long Dark)
+    fogCold: 0.06,   // §8.1: was 0.075 (swallowed the exploration ambient)
     farPlane: 42,
     exposure: 1.1,
-    // Hemisphere: 0.9 before the first fire; eases to 0.45 over ~3 s once any fire is lit; back to
-    // 0.9 only when every fire is out (§8).
-    hemi: { sky: 0x3a5a80, ground: 0x0b0e14, intensity: 0.9, litIntensity: 0.45, easeSeconds: 3 },
+    // §8.1 darkness fix (Art-approved Nov 3): distance-driven ambient. k = smoothstep(rIn, rIn+6, d)
+    // from the nearest LIT fire (k = 1 when none is lit): 0 = at the fire, 1 = exploring.
+    hemi: {
+      sky: 0x3a5a80, skyFar: 0x4a6a94, ground: 0x0b0e14, groundFar: 0x1a2230,
+      intensity: 0.45, intensityFar: 0.85, outerPad: 6, smoothing: 4,
+      fogNear: 0x3a4656, fogFar: 0x34405a,
+      // zone tints by chamber index (cave.js CHAMBERS): z = 1 - smoothstep(r, r+3, distToCentre)
+      tints: [
+        { chamber: 1, sky: 0x5a4a8a, fog: 0x3a3450 }, // Flintseam Ridge (crystals)
+        { chamber: 4, sky: 0x3a6a7a, fog: 0x30454f }, // the Hushing Pools
+      ],
+      tintSky: 0.4, tintFog: 0.3,
+    },
     // Dynamic point-light budget (§6: 1 campfire + 1 lantern + hemisphere). Campfire, Wren's lantern
     // and torches are *emitters* competing for this many real PointLights; the rest stay emissive.
     maxPointLights: params.get('low') === '1' ? 1 : 2,
@@ -50,12 +60,22 @@ export const CONFIG = {
     maxSparks: 30,       // ember sparks per fire (style guide: ≤60)
     lightRadius: 10,
   },
-  items: { wood: 30, stone: 16, flint: 10 },
-  build: { floorCost: { wood: 2, stone: 1 }, grid: 2 }, // M0 placeholder: wooden floor tiles only
+  items: {
+    wood: 30, stone: 16, flint: 10,          // M0 loose pickups
+    mushroom: 12, glowcap: 14, shard: 10,    // M1 cave forage
+    // seconds until a picked item regrows (only while the player is > 7 m away, so nothing pops in)
+    respawn: { wood: 300, stone: 300, flint: 360, mushroom: 180, glowcap: 240, shard: 420 },
+  },
+  // Hold-to-gather nodes (tap-hold the target or hold Use). Root trees → wood, cave rocks → stone.
+  harvest: {
+    tree: { count: 10, seconds: 1.6, yield: { wood: 3 }, respawn: 240, reach: 2.6 },
+    rock: { count: 14, seconds: 1.3, yield: { stone: 2 }, flintChance: 0.4, respawn: 200, reach: 2.4 },
+  },
+  build: { grid: 2, wallHeight: 2.1, reach: 2.2 }, // piece costs live in src/build/pieces.js
   playerName: 'Cam',
   companion: {
     name: 'Wren', // persona + lines come from /story via src/companion/story-data.js (npm run sync-story)
-    lantern: { color: 0xe08a2e, intensity: 3.0, distance: 6 }, // §8: #E08A2E, 3.0, 6, decay 2; fades out inside the fire radius
+    lantern: { color: 0xe08a2e, intensity: 3.5, distance: 7 }, // §8.1: #E08A2E, 3.5, 7, decay 2; off inside the fire radius (key light while exploring)
     hood: { upWhenFog: 'thick', downNearFireSeconds: 4, minToggleSeconds: 10 }, // see wren.js _updateHood
     barkCooldown: 25, // seconds between unprompted remarks
     summarizeEvery: 30, // messages between memory summary passes
@@ -91,7 +111,18 @@ export const CONFIG = {
       stone: 'assets/models/props/resource-stone.glb',
       boulder: 'assets/models/nature/stone_largeA.glb',
       pillar: 'assets/models/nature/stone_tallA.glb',
-      floorPiece: 'assets/models/wood-floors-structures/floor.glb',
+      // M1 building pieces (Ember Hollow originals, art/assets/build + props; 2 m wide, origin at base)
+      floorPiece: 'assets/models/build/floor-plank.glb',
+      wallPiece: 'assets/models/build/wall-log.glb',
+      windowPiece: 'assets/models/build/wall-log-window.glb',
+      doorPiece: 'assets/models/build/wall-log-door.glb',
+      roofPiece: 'assets/models/build/roof-log.glb',
+      lanternPiece: 'assets/models/build/lantern_double.glb',
+      chestPiece: 'assets/models/props/chest.glb',
+      bedrollPiece: 'assets/models/props/bedroll.glb',
+      // M1 gathering
+      rockB: 'assets/models/cave-rock/rock-b.glb',
+      mushroomRed: 'assets/models/nature/mushroom_red.glb',
       // Custom Style-A props (art director): crystals, moss, torches — see src/world/dressing.js
       crystal1: 'assets/models/crystals/crystal-cluster-1.glb',
       crystal2: 'assets/models/crystals/crystal-cluster-2.glb',

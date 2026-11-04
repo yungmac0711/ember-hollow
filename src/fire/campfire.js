@@ -192,6 +192,12 @@ export class FireSystem {
     return f;
   }
 
+  remove(f) {
+    this.fires = this.fires.filter((x) => x !== f);
+    this.scene.remove(f.group);
+    if (f.emitter) this.budget?.remove(f.emitter);
+  }
+
   nearest(pos, maxDist = Infinity, litOnly = false) {
     let best = null, bd = maxDist;
     for (const f of this.fires) {

@@ -32,11 +32,6 @@
   <div id="touch-layer"></div>
 
   <div id="hud">
-    <div id="inventory">
-      <div class="chip" id="inv-wood" title="Wood"><span class="ico">🪵</span><span class="n">0</span></div>
-      <div class="chip" id="inv-stone" title="Stone"><span class="ico">🪨</span><span class="n">0</span></div>
-      <div class="chip" id="inv-flint" title="Flint"><span class="ico">✦</span><span class="n">0</span></div>
-    </div>
     <div id="hint"></div>
     <div id="area-name"></div>
     <div id="toast"></div>
@@ -46,12 +41,32 @@
     <div id="fps" class="hidden"></div>
 
     <div id="joystick" class="hidden"><div class="knob"></div></div>
+    <div id="ring" class="hidden"><div class="fill"></div><span class="ico"></span></div>
+
+    <!-- M1: hotbar (resources) + bag; swaps to the piece palette in build mode -->
+    <div id="hotbar" class="bar-ui"></div>
+    <div id="palette" class="bar-ui scroll hidden"></div>
 
     <div id="buttons">
       <button class="btn small" id="btn-chat" aria-label="Talk">💬</button>
       <button class="btn small" id="btn-build" aria-label="Build">🔨</button>
+      <button class="btn small build-only" id="btn-rotate" aria-label="Rotate piece">⟳</button>
+      <button class="btn small build-only" id="btn-remove" aria-label="Remove mode">🗑</button>
       <button class="btn" id="btn-interact" aria-label="Interact"><span class="label">Use</span></button>
       <button class="btn big" id="btn-jump" aria-label="Jump">⤒</button>
+    </div>
+  </div>
+
+  <div id="bag" class="panel hidden" role="dialog" aria-label="Inventory">
+    <div class="panel-head"><span>Pack</span><button class="panel-close" data-close="bag" aria-label="Close">✕</button></div>
+    <div class="panel-body" id="bag-list"></div>
+  </div>
+
+  <div id="chestui" class="panel hidden" role="dialog" aria-label="Storage chest">
+    <div class="panel-head"><span>Storage chest</span><button class="panel-close" data-close="chestui" aria-label="Close">✕</button></div>
+    <div class="panel-body chest-cols">
+      <div><div class="col-title">Pack · tap to store</div><div id="chest-pack" class="slot-grid"></div></div>
+      <div><div class="col-title">Chest · tap to take</div><div id="chest-store" class="slot-grid"></div></div>
     </div>
   </div>
 
@@ -72,7 +87,8 @@
       <p id="start-msg">Loading…</p>
       <div class="controls-help">
         <div><b>Touch:</b> left thumb moves · drag right side to look · tap a friend to talk/pet</div>
-        <div><b>Desktop:</b> WASD · mouse look · Space jump · E use · B build · T talk</div>
+        <div><b>Gather:</b> hold Use (or press and hold on a tree or rock) to chop and break</div>
+        <div><b>Desktop:</b> WASD · mouse look · Space jump · E use (hold to gather) · B build · R rotate · X remove · 1–0 pieces · I pack · T talk</div>
       </div>
     </div>
   </div>

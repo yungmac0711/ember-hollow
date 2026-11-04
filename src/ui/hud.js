@@ -1,11 +1,10 @@
-// DOM HUD: inventory, hints, toasts, Wren subtitles, area names, campfire fuel, FPS counter.
+// DOM HUD (inventory/hotbar lives in inventory-ui.js): hints, toasts, Wren subtitles, area names, campfire fuel, FPS counter.
 import { CONFIG } from '../config.js';
 
 const $ = (id) => document.getElementById(id);
 
 export class HUD {
   constructor() {
-    this.inv = { wood: $('inv-wood'), stone: $('inv-stone'), flint: $('inv-flint') };
     this.hint = $('hint'); this.toastEl = $('toast'); this.area = $('area-name');
     this.fuel = $('fuel'); this.fuelFill = this.fuel.querySelector('.fill'); this.fuelLabel = this.fuel.querySelector('.label');
     this.sub = $('subtitle'); this.subLine = this.sub.querySelector('.line');
@@ -17,17 +16,6 @@ export class HUD {
     this._frames = 0; this._fpsT = 0;
   }
 
-  setInventory(inv) {
-    for (const k of Object.keys(this.inv)) {
-      if (this._last[k] !== inv[k]) {
-        const el = this.inv[k];
-        el.querySelector('.n').textContent = inv[k];
-        if (this._last[k] !== undefined) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
-        this._last[k] = inv[k];
-      }
-    }
-  }
-
   setHint(text) { if (this.hint.textContent !== text) this.hint.textContent = text; }
 
   setInteract(label) {
@@ -37,6 +25,7 @@ export class HUD {
   }
 
   setBuildActive(on) { this.buildBtn.classList.toggle('active', on); }
+  setRemoveActive(on) { $('btn-remove').classList.toggle('active', !!on); }
 
   toast(text, secs = 2.2) { this.toastEl.textContent = text; this.toastEl.classList.add('show'); this._toastT = secs; }
 

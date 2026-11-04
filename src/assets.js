@@ -96,7 +96,8 @@ export async function loadParts(name, opts = {}) {
       const material = toLambert(src, opts.keepEmissive === false ? { ...opts, emissive: opts.emissive ?? 0 } : opts);
       // `node` = nearest named ancestor (e.g. 'flame' child of a torch) for per-part handling
       let n = o; while (n && !n.name && n.parent) n = n.parent;
-      parts.push({ geometry: g, material, node: n?.name || '' });
+      const ancestors = []; for (let a = o; a; a = a.parent) if (a.name) ancestors.push(a.name);
+      parts.push({ geometry: g, material, node: n?.name || '', ancestors });
     });
     // glTF extras on any node (e.g. { pointLight: {color, intensity, distance, decay, offset} })
     let extras = null;

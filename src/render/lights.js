@@ -31,6 +31,10 @@ export class LightBudget {
   }
 
   add(emitter) { this.emitters.push(emitter); return emitter; }
+  remove(emitter) {
+    this.emitters = this.emitters.filter((e) => e !== emitter);
+    for (const s of this.slots) if (s.emitter === emitter) { s.emitter = null; s.fade = 0; s.light.intensity = 0; }
+  }
 
   /** Number of slots currently contributing light (for the perf report). */
   get activeCount() { return this.slots.filter((s) => s.emitter && s.light.intensity > 0.01).length; }

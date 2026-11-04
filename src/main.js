@@ -1,10 +1,11 @@
-// Ember Hollow — M0 bootstrap + game loop. Wires world, entities, fire, companion and UI together.
+// Ember Hollow — bootstrap + game loop (M0 + M1 chunk A: gathering + building). Wires world, entities, fire, companion and UI together.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Cave } from './world/cave.js';
 import { buildDecor } from './world/decor.js';
 import { buildDressing } from './world/dressing.js';
 import { LightBudget } from './render/lights.js';
+import { AmbientController } from './render/ambient.js';
 import { Input } from './input/input.js';
 import { Player } from './entities/player.js';
 import { Items, ITEM_INFO } from './entities/items.js';
@@ -16,7 +17,11 @@ import { CompanionMemory } from './companion/memory.js';
 import { ChatUI } from './companion/chat-ui.js';
 import { AmbientLines } from './companion/ambient.js';
 import { fireLevelWord, fogWord } from './companion/context.js';
-import { BuildSystem } from './build/shelter.js';
+import { BuildSystem, loadPieceParts } from './build/shelter.js';
+import { PIECES, PIECE_ORDER } from './build/pieces.js';
+import { Harvest } from './entities/harvest.js';
+import { Colliders } from './world/colliders.js';
+import { InventoryUI, HOTBAR } from './ui/inventory-ui.js';
 import { HUD } from './ui/hud.js';
 import { GameAudio } from './audio.js';
 import { loadModel, loadParts, loadScene } from './assets.js';
@@ -44,8 +49,7 @@ scene.background = new THREE.Color(R.background);
 scene.fog = new THREE.FogExp2(R.fogColor, R.fogCold);
 const camera = new THREE.PerspectiveCamera(R.fov, window.innerWidth / window.innerHeight, 0.05, R.farPlane);
 scene.add(camera);
-// §8 approved lighting: hemisphere 0.9 before the first fire, eases to 0.45 over ~3 s once any
-// fire is lit (the fire becomes the key light), back to 0.9 only when every fire is out.
+// Hemisphere colours/intensity + fog colour are driven per frame by AmbientController (§8.1).
 const hemi = new THREE.HemisphereLight(R.hemi.sky, R.hemi.ground, R.hemi.intensity);
 scene.add(hemi);
 // Fixed pool of real PointLights shared by campfires (priority 3), Wren's lantern (2) and torches (1)
@@ -69,6 +73,7 @@ window.addEventListener('orientationchange', () => setTimeout(onResize, 250));
 // ---------------------------------------------------------------- world
 const seed = CONFIG.debug.seed;
 const cave = new Cave(seed);
+const ambientLight = new AmbientController(hemi, scene.fog, cave);
 scene.add(cave.buildMeshes());
 const [lanternmouth] = cave.chambers;
 
@@ -80,6 +85,7 @@ const input = new Input({
   buttons: {
     jump: document.getElementById('btn-jump'), interact: document.getElementById('btn-interact'),
     build: document.getElementById('btn-build'), chat: document.getElementById('btn-chat'),
+    rotate: document.getElementById('btn-rotate'), remove: document.getElementById('btn-remove'),
   },
 });
 
@@ -90,15 +96,16 @@ async function init() {
   startMsg.textContent = 'Gathering kindling…';
   // Load Kenney GLBs in parallel (each falls back to primitives on failure)
   const raw = { raw: true };
-  const [decorBoulder, decorPillar, woodParts, stoneParts, flintParts, pitParts, floorParts, wrenScene, puppyModel,
-    wrenHood, crys1, crys2, crys3, crys4, moss1, moss2, moss3, cap1, cap2, torchWall, torchStanding] = await Promise.all([
+  const [decorBoulder, decorPillar, woodParts, stoneParts, flintParts, pitParts, pieceParts, wrenScene, puppyModel,
+    wrenHood, crys1, crys2, crys3, crys4, moss1, moss2, moss3, cap1, cap2, torchWall, torchStanding,
+    rockA, rockB, rockC, mushroomParts] = await Promise.all([
     loadParts('boulder', { size: 1.0, color: 0x3e4a57 }),
     loadParts('pillar', { size: 0.9, color: 0x2b3440 }),
     loadParts('stick', { size: 0.6 }),
     loadParts('stone', { size: 0.32 }),
     loadParts('stone', { size: 0.26, color: 0x3a3a46, emissive: 0x120804 }), // flint: dark, faint warm sheen
     loadParts('campfire', { size: 1.15 }),
-    loadParts('floorPiece', { size: CONFIG.build.grid }),
+    loadPieceParts(),
     loadScene('companion'), // art-director Wren: 1.7 m, metres, origin at feet, facing +Z
     loadModel('puppy', buildPuppyPrimitive),
     loadScene('companionHood'),
@@ -106,6 +113,8 @@ async function init() {
     loadParts('mossClump1', raw), loadParts('mossClump2', raw), loadParts('mossClump3', raw),
     loadParts('mossCap1', raw), loadParts('mossCap2', raw),
     loadParts('torchWall', raw), loadParts('torchStanding', raw),
+    loadParts('rockB', { size: 1.1 }), null, null,
+    loadParts('mushroomRed', { size: 0.26 }),
   ]);
   const crystalParts = [crys1, crys2, crys3, crys4].filter(Boolean);
 
@@ -114,15 +123,20 @@ async function init() {
     crystals: crystalParts, mossClumps: [moss1, moss2, moss3], mossCaps: [cap1, cap2], torchWall, torchStanding,
   }, budget, { boulders: decor.boulders });
   if (crystalParts.length) decor.crystals = dressing.crystals; // found_crystal trigger uses the real clusters
-  const items = new Items(scene, cave, seed, { wood: woodParts, stone: stoneParts, flint: flintParts });
+  const items = new Items(scene, cave, seed, { wood: woodParts, stone: stoneParts, flint: flintParts, mushroom: mushroomParts });
   const fires = new FireSystem(scene, cave, pitParts, budget);
-  const build = new BuildSystem(scene, cave, floorParts);
+  const colliders = new Colliders();
+  const harvest = new Harvest(scene, cave, seed, colliders, [rockA]);
+  const build = new BuildSystem(scene, cave, pieceParts, { fires, budget, colliders });
 
   const spawn = new THREE.Vector3(lanternmouth.x + 0.5, 0, lanternmouth.z + 2);
   spawn.y = cave.floorAt(spawn.x, spawn.z);
   const player = new Player(camera, cave, spawn);
   player.yaw = 0.35;
   player.extraFloor = (x, z) => build.heightAt(x, z);
+  player.colliders = colliders;
+  harvest.canRespawn = (n) => !build.pieces.some((p) => Math.hypot(p.x - n.pos.x, p.z - n.pos.z) < 1.4);
+  build.blocked = (x, z, r) => harvest.nodes.some((n) => n.alive && Math.hypot(n.pos.x - x, n.pos.z - z) < r + (n.type === 'tree' ? 0.5 : 0.45));
 
   const pModel = puppyModel.fromFile || puppyModel.parts.legs ? puppyModel : { ...buildPuppyPrimitive(), animations: [] };
   const puppy = new Puppy(scene, cave, pModel, spawn.clone().add(new THREE.Vector3(-1.2, 0, -1.5)));
@@ -175,6 +189,27 @@ async function init() {
   });
   ambient.onLine = (trigger, line) => { hud.say(line); chat.addAmbient(line); };
 
+  // ------------------------------------------------------------ hotbar, pack, chest
+  const invUI = new InventoryUI({
+    onSelectPiece: (t) => { build.select(t); hud.setRemoveActive(false); invUI.setPalette(t, player.inventory); },
+    onStore: (k) => moveItems(player.inventory, invUI.chestData?.store, k),
+    onTake: (k) => moveItems(invUI.chestData?.store, player.inventory, k),
+    onPanel: (open, was, data) => {
+      if (open) { input.enabled = false; input.reset(); if (document.pointerLockElement) document.exitPointerLock(); }
+      else { input.enabled = true; if (was === 'chest' && data?.piece) build.setChestOpen(data.piece, false); if (!matchMedia('(pointer: coarse)').matches) input.requestPointerLock(); }
+    },
+  });
+  invUI.bindInventory(player.inventory);
+  function moveItems(from, to, k) {
+    if (!from || !to || !(from[k] > 0)) return;
+    to[k] = (to[k] || 0) + from[k]; from[k] = 0; audio.blip(560);
+    invUI.renderChest(); invUI.setInventory(player.inventory);
+  }
+  function openChest(p) {
+    build.setChestOpen(p, true); audio.blip(300);
+    invUI.open('chest', { piece: p, store: p.store, inv: player.inventory });
+  }
+
   // ------------------------------------------------------------ session end → memory summary
   let lastActivity = performance.now(), sessionOpen = true;
   const touch = () => {
@@ -208,9 +243,17 @@ async function init() {
 
   function chooseAction() {
     const inv = player.inventory, fwd = player.forward;
-    if (build.active) return { label: 'Place floor', kind: 'build' };
+    if (build.active) {
+      if (build.removeMode) { const p = build.target?.remove; return p ? { label: `Remove ${PIECES[p.type].name.toLowerCase()}`, kind: 'remove' } : { label: 'Remove…', kind: 'remove' }; }
+      return { label: `Place ${PIECES[build.selected].name.toLowerCase()}`, kind: 'build' };
+    }
     const it = items.findTarget(player.pos, fwd);
     if (it) return { label: `Pick up ${ITEM_INFO[it.kind].label}`, kind: 'pick', it };
+    let node = harvest.findTarget(player.pos, fwd);
+    const bp = build.findInteractable(player.pos, fwd);
+    if (node && bp && Math.hypot(bp.x - player.pos.x, bp.z - player.pos.z) < Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z)) node = null; // nearer one wins
+    if (node) return { label: node.type === 'tree' ? 'Hold: chop' : 'Hold: break', kind: 'harvest', node };
+    if (bp) return bp.type === 'door' ? { label: bp.openTarget ? 'Close door' : 'Open door', kind: 'door', piece: bp } : { label: 'Open chest', kind: 'chest', piece: bp };
     const nf = fires.nearest(player.pos, 2.4);
     if (nf && inv.wood > 0 && nf.canAddFuel()) return { label: nf.lit ? 'Add wood' : 'Relight', kind: 'fuel', fire: nf };
     const dw = Math.hypot(wren.pos.x - player.pos.x, wren.pos.z - player.pos.z);
@@ -256,18 +299,73 @@ async function init() {
       }
       case 'pet': puppy.pet(); hud.toast(`${CONFIG.puppy.name} wiggles happily`, 1.6); break;
       case 'talk': chat.show(); break;
+      case 'harvest': break; // hold-driven, see updateHold()
+      case 'door': { const open = build.toggleDoor(a.piece); audio.blip(open ? 240 : 200); break; }
+      case 'chest': openChest(a.piece); break;
       case 'build': {
         const r = build.place(inv);
-        if (r === 'placed') { hud.toast('Floor tile placed', 1.4); ambient.trigger('shelter_built'); if (build.tiles.size === 1) memory.addFact('milestone', 'Cam laid the first shelter floor', 3); }
-        else if (r === 'cost') hud.toast('A floor tile needs 2 wood + 1 stone');
-        else hud.toast('Can’t build there');
+        if (r.ok) {
+          const name = PIECES[r.piece.type].name;
+          hud.toast(`${name} placed`, 1.2); audio.blip(360);
+          ambient.trigger('shelter_built');
+          if (build.pieces.length === 1) memory.addFact('milestone', 'Cam started building a shelter', 3);
+          if (r.piece.type === 'hearth') hud.toast('Hearth built. Add wood to light it', 2.4);
+        } else hud.toast(r.why, 1.8);
+        break;
+      }
+      case 'remove': {
+        const r = build.remove(inv);
+        if (r.ok) { hud.toast(`Removed ${PIECES[r.piece.type].name.toLowerCase()} (refunded ${Object.entries(r.refund).map(([k, n]) => `${n} ${k}`).join(' + ')})`, 1.8); audio.blip(260); }
+        else hud.toast(r.why, 1.8);
         break;
       }
     }
   }
 
+  // hold-to-gather: hold Use on the targeted tree/rock, or press and hold on it (touch)
+  let hold = null;
+  function updateHold(dt) {
+    const inv = player.inventory;
+    let node = null, src = null, lh = null;
+    if (!build.active && !invUI.openPanel && input.enabled) {
+      if (input.held.has('interact') && ctxAction?.kind === 'harvest') { node = ctxAction.node; src = 'use'; }
+      else if (hold?.src === 'use' && input.held.has('interact') && hold.node.alive) { node = hold.node; src = 'use'; }
+      else if ((lh = input.lookHold) && lh.ms > 180) {
+        node = hold?.src === 'touch' && hold.node.alive ? hold.node : harvest.pickScreen(lh.x, lh.y, camera, player.pos);
+        src = 'touch';
+      }
+    }
+    if (node && Math.hypot(node.pos.x - player.pos.x, node.pos.z - player.pos.z) > harvest.cfg(node).reach + 0.6) node = null;
+    if (!node) { hold = null; invUI.setRing(null); return; }
+    if (!hold || hold.node !== node) hold = { node, src, t: 0, tick: 0 };
+    const dur = harvest.cfg(node).seconds;
+    hold.t += dt;
+    harvest.shake(node, hold.t / dur);
+    if ((hold.tick -= dt) <= 0) { hold.tick = 0.32; audio.blip(node.type === 'tree' ? 180 + Math.random() * 30 : 130 + Math.random() * 25); }
+    const sp = src === 'touch' && lh ? lh : harvest.screenPos(node, camera);
+    invUI.setRing(hold.t / dur, sp.x, sp.y, node.type === 'tree' ? '🪓' : '⛏️');
+    if (hold.t >= dur) {
+      const got = harvest.harvest(node);
+      for (const [k, n] of Object.entries(got)) inv[k] = (inv[k] || 0) + n;
+      hud.toast(Object.entries(got).map(([k, n]) => `+${n} ${ITEM_INFO[k].label}`).join('  '), 1.4);
+      audio.blip(node.type === 'tree' ? 520 : 700);
+      const kind = node.type === 'tree' ? 'wood' : 'stone';
+      recentFinds.push(kind); if (recentFinds.length > 5) recentFinds.shift();
+      ambient.trigger(`found_${kind}`);
+      if (got.flint) ambient.trigger('found_flint');
+      hold = null;
+      invUI.setRing(null);
+    }
+  }
+
   function handleTaps() {
     for (const t of input.taps) {
+      const bp = build.pickScreen(t.x, t.y, camera, player.pos);
+      if (bp && !build.active) {
+        if (bp.type === 'door') { const open = build.toggleDoor(bp); audio.blip(open ? 240 : 200); }
+        else openChest(bp);
+        continue;
+      }
       ndc.set((t.x / window.innerWidth) * 2 - 1, -(t.y / window.innerHeight) * 2 + 1);
       raycaster.setFromCamera(ndc, camera);
       const hitW = raycaster.intersectObject(wren.hit, false)[0];
@@ -340,11 +438,15 @@ async function init() {
 
   function updateHint() {
     const inv = player.inventory;
-    hud.setInventory(inv);
-    if (build.active) hud.setHint(`Build mode — floor tile: 2 wood + 1 stone. Tap 🔨 to exit.`);
+    invUI.setInventory(inv);
+    if (build.active) {
+      hud.setHint(build.removeMode ? 'Remove mode: aim at a piece, then Use for a full refund. 🗑 to go back.'
+        : `${PIECES[build.selected].name}: ${build.costText()}. ⟳ rotate · 🗑 remove · 🔨 done`);
+      invUI.setPalette(build.selected, inv);
+    }
     else if (!fires.fires.length) hud.setHint(`Light a campfire: wood ${Math.min(inv.wood, FC.woodToBuild)}/${FC.woodToBuild} · flint ${Math.min(inv.flint, FC.flintToBuild)}/${FC.flintToBuild}${inv.flint < 1 ? ' (look on Flintseam Ridge)' : ''}`);
     else if (!fires.nearest(player.pos, Infinity, true)) hud.setHint('The fire is out. Add wood to relight it.');
-    else hud.setHint('Keep the fire fed with wood — the fog creeps in as it dies.');
+    else hud.setHint('Keep the fire fed. Hold Use on trees and rocks to gather, 🔨 to build.');
     const nf = fires.nearest(player.pos, 14);
     hud.setFuel(nf);
   }
@@ -362,27 +464,36 @@ async function init() {
     if (running) {
       if (input.consume('chat')) chat.toggle();
       if (input.consume('build')) {
-        const on = build.toggle(); hud.setBuildActive(on);
-        hud.toast(on ? 'Build mode: snap a wooden floor (walls & roof in M1)' : 'Build mode off', 2.2);
+        const on = build.toggle(); hud.setBuildActive(on); hud.setRemoveActive(false);
+        invUI.setBuildMode(on, build.selected, player.inventory);
+        hud.toast(on ? 'Build mode: pick a piece below' : 'Build mode off', 1.8);
+      }
+      if (input.consume('bag')) invUI.toggleBag();
+      if (build.active) {
+        if (input.consume('rotate')) build.rotate();
+        if (input.consume('remove')) hud.setRemoveActive(build.setRemove());
+      } else { input.consume('rotate'); input.consume('remove'); }
+      for (let n = 1; n <= 10; n++) if (input.consume('slot' + n)) {
+        if (build.active) { build.select(PIECE_ORDER[n - 1]); hud.setRemoveActive(false); } else if (HOTBAR[n - 1]) invUI.select(HOTBAR[n - 1]);
       }
       handleTaps();
       player.update(dt, input);
-      build.update(player);
+      build.update(player, dt);
       ctxAction = chooseAction();
       hud.setInteract(ctxAction?.label);
       if (input.consume('interact')) doAction(ctxAction);
-      items.update(dt, ctxAction?.kind === 'pick' ? ctxAction.it : null);
+      updateHold(dt);
+      items.update(dt, ctxAction?.kind === 'pick' ? ctxAction.it : null, player.pos);
+      harvest.update(dt, player.pos);
       updateTriggers(dt);
       ambient.update(dt);
     } else {
       player.update(0, input);
+      build.update(player, dt);
     }
     fires.update(dt);
     const anyLit = fires.anyLit;
-    // hemisphere ease (§8): 0.9 → 0.45 over ~3 s when any fire is lit; back only when all are out
-    const hTarget = anyLit ? R.hemi.litIntensity : R.hemi.intensity;
-    const hStep = (R.hemi.intensity - R.hemi.litIntensity) / R.hemi.easeSeconds * dt;
-    hemi.intensity += Math.max(-hStep, Math.min(hStep, hTarget - hemi.intensity));
+    ambientLight.update(dt, player.pos, fires); // §8.1 distance-driven ambient
     puppy.update(dt, player, fires);
     wren.update(dt, player, fires, chat.open, { fog: fogState() });
     decor.update(dt);
@@ -395,7 +506,7 @@ async function init() {
     renderer.render(scene, camera);
   }
 
-  Object.assign(game, { hemi, budget, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, ready: true,
+  Object.assign(game, { THREE, hemi, ambientLight, budget, harvest, colliders, invUI, dressing, scene, camera, renderer, cave, player, items, fires, puppy, wren, chat, memory, ambient, build, hud, input, gameState, ready: true,
     start: () => begin() });
 
   // ------------------------------------------------------------ start screen
